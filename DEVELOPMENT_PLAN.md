@@ -20,10 +20,10 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 |---|---|
 | 0 — Foundation & Repo Setup | **Done.** Removed from this doc; see `git log`. |
 | 1 — Backend Ingestion MVP | **Done.** Removed from this doc; see `git log`. |
-| 2 — Azure Key Vault & Deployment | **Partial.** KV config provider, fail-fast validation, and setup docs shipped (was 2.2 + 2.5). Arlo now has Azure Owner — provisioning is no longer Brandon-dependent. End-to-end `az` CLI runbook committed at [`docs/azure-provisioning-runbook.md`](docs/azure-provisioning-runbook.md). Hosting (2.3), DB cutover (2.4), and UAT/Prod vaults (2.1 partial) are ready to execute. |
+| 2 — Azure Key Vault & Deployment | **Partial.** KV config provider, fail-fast validation, setup docs, and end-to-end `az` CLI runbook shipped (2.2 + 2.5 + runbook). **Dev hosting + MI live**: `obs-api-dev` App Service + `id-observability-dev` user-assigned MI provisioned with OIDC federated credentials; CI deploys on push to main (closes 2.3 for Dev). EF migrations cutover landed (`EnsureCreatedAsync` → `MigrateAsync` with `Initial` migration covering Phase 1+4+5 schema). Outstanding: 2.1 UAT/Prod vaults; 2.3 UAT/Prod App Service instances; 2.4 Dev DB smoke + UAT/Prod DB cutover. |
 | 3 — React Dashboard MVP | **Done.** Removed from this doc; see `git log`. |
 | 4 — Client SDKs | **Done for MVP.** Both SDKs scaffolded; JS SDK auto-brackets sessions (4.11) and SCH route-normalization audit landed (4.2 closed with a parity test set). Issues 4.7 closed (won't-do) and 4.8 handed to 8.2 (Brandon confirmed 2026-04-30). |
-| 5 — Session Timeline | **Partial.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`; 31 backend tests including chunked-IN-list and orphan-`/end` regressions. SDK auto-bracket gap closed via Issue 4.11. Outstanding: 5.2 benchmark spike not run; 5.5 end-to-end correlation-id verification owned by Phase 6.1. |
+| 5 — Session Timeline | **Hardened.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`. SDK auto-bracket gap closed via Issue 4.11. **5.7 landed (2026-05-22):** full 8-cell benchmark grid run before/after on local Docker MSSQL; `Phase5HardeningIndexes` additive migration ships `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` + `Errors(ApplicationId, EnvironmentId, LastCorrelationId)`. p95 stays under 200ms through the 10k-events/session architecture-doc upper bound; 100k cell confirms the documented materialization boundary (see [`docs/perf.md`](docs/perf.md)). Outstanding: 5.5 cross-process correlation verification owned by Phase 6.1; re-run grid against Azure SQL Dev after 2.4 lands; 4.11 live-ingest test against `obs-api-dev` requires a Dev app/key (Brandon-owned). |
 | 6 — SCH Onboarding | Open. **Re-scoped 2026-04-30:** PostHog Phase 1 was never merged from `feature/posthog-implementation` into SCH `dev` or `main` (verified). PostHog migration is dropped; SCH onboards as a fresh integration. PostHog branches retained as scaffolding reference only. |
 | 7 — WMS Onboarding | Open. Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. |
 | 8 – 9 | Open. Documented below. |
@@ -190,6 +190,9 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - Issue 2.2 (KV config provider with fail-fast) — `backend/src/Observability.Api/Configuration/KeyVaultConfiguration.cs`.
 - Issue 2.5 (`docs/azure-key-vault-setup.md`) — provisioning steps + rotation runbooks.
 - Dev portion of 2.1 — `AdaptiveToolsKeyVault` (centralus, RBAC) holds four placeholder secrets tagged `purpose=adaptive-observability`. UAT/Prod vaults are not yet provisioned.
+- End-to-end `az` CLI runbook ([`docs/azure-provisioning-runbook.md`](docs/azure-provisioning-runbook.md)) covering Dev KV, user-assigned MI, App Service Linux on a shared plan, ObservabilityDev DB with public-network + firewall, MI SQL grant, and the real connection string in KV.
+- **Issue 2.3 closed for Dev** — `obs-api-dev` App Service running on shared plan in `AdaptiveTools` RG; user-assigned MI `id-observability-dev` attached with `Key Vault Secrets User` on the Dev vault. CI workflow in `.github/workflows/backend.yml` deploys via OIDC federated credentials on push to main (no GitHub secrets stored), stamps `RELEASE_SHA`, and smokes `/health` post-deploy.
+- **Issue 2.4 partial** — EF migrations cutover landed: `EnsureCreatedAsync` replaced with `MigrateAsync` (relational-only guard preserves InMemory tests), `Initial` migration generated covering the Phase 1+4+5 schema, and a design-time DbContext factory committed for tooling. Dev DB provisioning + ingestion smoke still owed.
 
 ### Issue 2.1 — Provision UAT and Prod vaults
 
@@ -222,12 +225,17 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - **App Service Plan:** reuse a single shared plan; provision a new App Service *instance* per environment (Dev first). Brandon owns plan provisioning.
 - **SKU / app name / slot strategy:** Brandon picks at provision time. Plan-level reuse means Dev shares whatever SKU the plan ships with.
 
-**Acceptance criteria:**
-- [ ] App Service Plan provisioned, hosting a Dev App Service instance (Brandon)
-- [ ] User-assigned MI created and attached to the App Service
-- [ ] MI granted `Key Vault Secrets User` on the Dev vault, scoped to that vault only
-- [ ] `KeyVault__Uri` app setting points at the Dev vault
-- [ ] `/health` returns 200 from the deployed API; KV-backed config resolves on startup
+**Acceptance criteria (Dev — closed):**
+- [x] App Service Plan provisioned, hosting Dev App Service instance `obs-api-dev`
+- [x] User-assigned MI `id-observability-dev` created and attached to the App Service
+- [x] MI granted `Key Vault Secrets User` on the Dev vault, scoped to that vault only
+- [x] `KeyVault__Uri` app setting points at the Dev vault
+- [x] `/health` returns 200 from the deployed API; KV-backed config resolves on startup (verified by CI smoke after `5bd404c`)
+
+**Acceptance criteria (UAT/Prod — open):**
+- [ ] Provision UAT and Prod App Service instances on the shared plan
+- [ ] User-assigned MIs (or environment-scoped federated credentials) wired with `Key Vault Secrets User` on the respective vaults
+- [ ] CI deploy job extended to UAT/Prod with appropriate gating
 
 ### Issue 2.4 — Move database secret to Key Vault
 
@@ -256,7 +264,7 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - **Server topology:** Path A — reuse `adaptivetoolssql`; new `ObservabilityDev` database for Dev (and per-env DBs for UAT/Prod when those land).
 - **Network access:** Re-enable public network access on `adaptivetoolssql` + add a firewall rule for the App Service outbound IPs. **Note:** this reverses the prior "public access disabled" hardening — App Service outbound IPs change on plan scale events, so this option carries a small ongoing maintenance cost (firewall rule must be re-synced if the plan changes). Recorded for visibility; revisit at UAT/Prod if posture concerns surface.
 - **Human dependency:** Brandon will run the `CREATE USER … FROM EXTERNAL PROVIDER` T-SQL when the App Service MI is ready.
-- **Migration strategy:** Generate `dotnet ef migrations add Initial`, switch `EnsureCreatedAsync` → `MigrateAsync` as part of this issue (before the first non-Dev deploy).
+- **Migration strategy:** Generate `dotnet ef migrations add Initial`, switch `EnsureCreatedAsync` → `MigrateAsync` as part of this issue (before the first non-Dev deploy). **Shipped in commit `75ef382` — `Initial` migration covers Phase 1+4+5 schema; `MigrateAsync` guards InMemory tests via the relational provider check; design-time factory committed for tooling.**
 
 **Decisions still needed:**
 - **Database SKU for `ObservabilityDev`:** match `MaintenanceDB` shape (`GP_S_Gen5_1` serverless, ~$5–15/mo idle) or fixed-capacity? Default to serverless unless told otherwise.
@@ -340,12 +348,12 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 ### Issue 5.2 — Spike PR for derived vs materialized
 
-**Status:** the *decision* is recorded in [`docs/architecture.md`](docs/architecture.md) (derived for MVP, revisit when per-session entry counts push past ~10k). Benchmark harness lives at [`backend/src/Observability.Benchmarks`](backend/src/Observability.Benchmarks/); two anchor cells ran against local Docker MSSQL — results in [`docs/perf.md`](docs/perf.md). The 10k and 100k target-event cells are deferred (1M-event seeds take long enough on local Docker to trade off against shipping). Re-run against Azure SQL `ObservabilityDev` once Brandon provisions it.
+**Status:** the *decision* is recorded in [`docs/architecture.md`](docs/architecture.md) (derived for MVP, revisit when per-session entry counts push past ~10k). Full 8-cell grid now captured in [`docs/perf.md`](docs/perf.md) (2026-05-22) with before/after numbers for the indexes shipped under 5.7. Verdict: derived holds through 10k events/session with the new indexes; 100k-cell confirms the materialization boundary.
 
 **Acceptance criteria:**
-- [x] Benchmark spike with seeded synthetic data; latency results recorded in `docs/perf.md` (partial — 2 of 8 grid cells; remainder deferred)
-- [ ] Run the deferred 10k and 100k target-event cells (the materialization-breakeven test) — `dotnet run -- --grid` once Docker is convenient
-- [ ] Re-run anchor cells against Azure SQL Dev after Phase 2.4 lands
+- [x] Benchmark spike with seeded synthetic data; latency results recorded in `docs/perf.md`
+- [x] Full 8-cell grid run (including the deferred 10k and 100k target-event cells)
+- [ ] Re-run grid against Azure SQL `ObservabilityDev` after Phase 2.4 lands
 - [ ] Confirm the derived approach holds at ingestion volumes from real onboarded apps
 
 ### Issue 5.5 — End-to-end correlation id propagation (cross-link to Phase 6)
@@ -354,6 +362,28 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 **Acceptance criteria:**
 - [ ] (Owned by Phase 6.1) Trace a single SCH UAT request from FE → BE → ingestion and confirm the same correlation id lands on both the FE `api_request_failed` event and the BE `server_error_occurred` error.
+
+### Issue 5.7 — Phase 5 hardening (unblocked grid cells + index review)
+
+**Description:** Close the actionable Phase 5 work that no longer depends on Phase 2.4 or Phase 6. Two strands:
+
+1. **Run the deferred benchmark grid cells.** The 10k and 100k target-events rows in [`docs/perf.md`](docs/perf.md) are the materialization-breakeven test; running them locally against Docker MSSQL is cheap and decides whether the derived approach needs the index call-outs below or actual materialization.
+2. **Index review surfaced by the captured 5.2 cells.** Two non-covered predicate columns were flagged during the spike but not tracked as work:
+   - `Errors.LastCorrelationId` — the cross-process join in [`SessionTimelineQuery`](backend/src/Observability.Infrastructure/Sessions/SessionTimelineQuery.cs) filters on it; current `Errors` indexes don't cover it. Invisible at today's Error-table sizes; projected scan once a real onboarded app produces sustained error volume.
+   - `Events(ApplicationId, EnvironmentId, SessionId)` — the per-session events scan filters on `SessionId` but the index is keyed on `CreatedAt`, forcing key lookups. Only matters above ~10k events/session; the 100k grid cell is the test.
+3. **Close the deferred 4.11 live-ingestion test now that `obs-api-dev` exists.** Previously punted to Phase 6 cutover prep because no live ingestion API was reachable; that constraint is gone as of `5bd404c`.
+
+**Acceptance criteria:**
+- [x] `dotnet run -c Release --project backend/src/Observability.Benchmarks -- --grid` executed; the four deferred cells filled in `docs/perf.md` *(2026-05-22, local Docker MSSQL)*
+- [x] `docs/perf.md` "Verdict" section updated — `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` shipped after the 1k/10k cells showed 44–67% p95 reductions; derived approach holds through 10k events/session; 100k-cell confirms the existing documented materialization boundary (no escalation needed unless a real onboarded app approaches that shape)
+- [x] Decision on `Errors(ApplicationId, EnvironmentId, LastCorrelationId)` recorded — index shipped in the same migration after the paired 5k cross-process cells showed a 44% p95 reduction at 10k target events
+- [ ] 4.11's deferred integration test executed against `obs-api-dev`: emit one event through the JS SDK, confirm a `Sessions` row appears with `started_at` and `last_seen_at` populated, and that calling `shutdown()` stamps `ended_at`. **Harness shipped** at [`packages/observability-client-js/scripts/live-ingest-check.mjs`](packages/observability-client-js/scripts/live-ingest-check.mjs) — Brandon runs it with `OBS_INGEST_URL=<obs-api-dev>` + a provisioned public key. Until obs-api-dev has an app + API key seeded, the harness can't be executed end-to-end; wire-protocol contract is already covered by [`SessionTimelineTests`](backend/tests/Observability.IntegrationTests/SessionTimelineTests.cs) + [`sessionBracket.test.ts`](packages/observability-client-js/src/__tests__/sessionBracket.test.ts).
+- [x] New indexes ship as an additive EF migration (no schema rewrite) and the `Initial` migration is left untouched — see [`Phase5HardeningIndexes`](backend/src/Observability.Infrastructure/Migrations/20260522222614_Phase5HardeningIndexes.cs)
+
+**Out of scope (explicitly):**
+- Re-running anchor cells against Azure SQL — still blocked on 2.4 DB provisioning, owned by 5.2.
+- Cross-process correlation trace from a real SCH request — still owned by 6.1.
+- Materializing `SessionEvents` — if the grid cells force this, file a new issue rather than expanding 5.7.
 
 ---
 
@@ -373,7 +403,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 - [ ] 4.11 (SDK auto-bracket sessions) shipped — without this, SCH `Sessions` rows are never written and Phase 5 timelines stay empty
 - [ ] 4.2 (SCH route fixture port) — port the validated regression suite from SCH_UI's `routeUtils.ts` tests into `packages/observability-client-js/src/__tests__/`
 - [ ] 5.5 verification harness — trace one SCH UAT request FE → BE → ingestion and confirm the same correlation id lands on both `api_request_failed` (FE) and `server_error_occurred` (BE)
-- [ ] EF `Initial` migration generated and `EnsureCreatedAsync` switched to `MigrateAsync` (owned by Phase 2.4) — required before the first non-Dev deploy
+- [x] EF `Initial` migration generated and `EnsureCreatedAsync` switched to `MigrateAsync` (owned by Phase 2.4) — required before the first non-Dev deploy *(shipped `75ef382`)*
 - [ ] Phase 2.3 hosting + 2.4 DB cutover at least Dev+UAT — without these the API has nowhere to receive SCH events
 - [ ] BG job dedup confirmed working in SCH_API integration (4.8 static 15-min default acceptable; per-app override deferred to 8.2)
 - [ ] `release_sha` populated in SCH_API + SCH_UI deployed envs via CI build-time injection
@@ -616,6 +646,25 @@ These differences from SCH (JS not TS, MSAL not custom JWT, no exception middlew
 - [ ] Worker runs nightly
 - [ ] Audit log row per run
 - [ ] Schema reserves a `ReplayRetentionDays` column on `AppEnvironments` (nullable until Phase 9)
+
+### Issue 8.9 — Admin app/key provisioning endpoint
+
+**Description:** The dashboard reads apps via `GET /api/apps` but exposes no way to *create* them. Every onboarding so far has assumed a hand-seeded `INSERT` into `Applications` + `AppEnvironments` + `ApiKeys` by whoever owns SQL admin on the target environment (Brandon for `ObservabilityDev`). This surfaced when trying to execute the 4.11 live-ingest harness against `obs-api-dev` (Phase 5.7): the harness script exists, but seeding the test app + API key requires direct DB access that the AAD-only `adaptivetoolssql` server scopes to Brandon. SCH (Phase 6.6) and WMS (Phase 7) onboarding will each hit the same wall.
+
+A small admin-provisioning endpoint removes the SQL-hand-seed dependency for every onboarding. RBAC (8.6) lands later; until then the endpoint can be gated by a server-side admin secret pulled from Key Vault — same trust boundary the dashboard already operates inside.
+
+**Acceptance criteria:**
+- [ ] `POST /api/admin/apps` — creates an `Application` + initial `AppEnvironment` rows. Idempotent on slug.
+- [ ] `POST /api/admin/apps/{slug}/environments/{env}/keys` — mints a fresh API key, returns plaintext **once**, persists only the hashed form via the existing `IApiKeyHasher`. Supports `key_type` (PublicClient / ServerApi).
+- [ ] Endpoints gated by an `X-Observability-Admin-Key` header validated against a Key Vault secret (placeholder name: `ObservabilityAdminKey`). Returns 401 if missing/wrong, identical shape to the existing api-key middleware.
+- [ ] Audit row written per call (foreshadows 8.7 schema; for now log to `SafetyViolations` or a stub `AuditLogs` table — decide at implementation time).
+- [ ] Integration tests: idempotent app creation; key minting returns plaintext on first call only and the hash matches what `ApiKeyResolver` would compute; 401 on missing header.
+- [ ] `obs-api-dev` provisioned with the admin key + a test app/key for the 4.11 harness — closes the deferred line in 5.7's acceptance criteria.
+- [ ] When 8.6 RBAC lands, the admin-key gate is replaced by role-based auth without changing the endpoint shape.
+
+**Investigation questions:**
+- Where does the admin secret live for local dev vs. deployed envs? Same `appsettings.Development.json` pattern as `ApiKeyHashPepper` probably suffices.
+- Should this endpoint also rotate keys (revoke + mint), or is rotation a separate issue? Lean: separate issue when it's actually needed.
 
 ### Issue 8.6 — RBAC
 **Description:** Admin / Developer / Viewer / AppOwner.

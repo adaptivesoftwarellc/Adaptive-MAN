@@ -67,6 +67,7 @@ public class ObservabilityDbContext : DbContext
             e.Property(x => x.PropertiesJson).HasColumnType("nvarchar(max)").IsRequired();
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.CreatedAt });
             e.HasIndex(x => new { x.ApplicationId, x.EventName, x.CreatedAt });
+            e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.SessionId, x.OccurredAt });
         });
 
         b.Entity<ErrorRecord>(e =>
@@ -84,6 +85,7 @@ public class ObservabilityDbContext : DbContext
             e.Property(x => x.PropertiesJson).HasColumnType("nvarchar(max)").IsRequired();
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.Fingerprint }).IsUnique();
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.LastSeenAt });
+            e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.LastCorrelationId });
         });
 
         b.Entity<SafetyViolation>(e =>
