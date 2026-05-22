@@ -81,9 +81,12 @@ jobs:
             --settings RELEASE_SHA=${GITHUB_SHA}
       - name: Deploy to App Service
         uses: azure/webapps-deploy@v3
+        # azure/webapps-deploy@v3 resolves `package:` paths relative to GITHUB_WORKSPACE,
+        # not the step's working-directory. The zip lands at workspace root (the `cd
+        # ../publish` from backend/ lands there), so use the absolute workspace path.
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          package: ../publish.zip
+          package: ${{ github.workspace }}/publish.zip
       - name: Smoke /health
         run: |
           sleep 45
