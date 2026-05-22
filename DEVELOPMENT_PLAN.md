@@ -20,9 +20,9 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 |---|---|
 | 0 — Foundation & Repo Setup | **Done.** Removed from this doc; see `git log`. |
 | 1 — Backend Ingestion MVP | **Done.** Removed from this doc; see `git log`. |
-| 2 — Azure Key Vault & Deployment | **Partial.** KV config provider, fail-fast validation, and setup docs shipped (was 2.2 + 2.5). Dev vault `AdaptiveToolsKeyVault` (centralus, RBAC) holds four placeholder secrets tagged `purpose=adaptive-observability`. Hosting (2.3) and DB-secret cutover (2.4) are open below; UAT/Prod vault provisioning (2.1 partial) is open below. |
+| 2 — Azure Key Vault & Deployment | **Partial.** KV config provider, fail-fast validation, and setup docs shipped (was 2.2 + 2.5). Arlo now has Azure Owner — provisioning is no longer Brandon-dependent. End-to-end `az` CLI runbook committed at [`docs/azure-provisioning-runbook.md`](docs/azure-provisioning-runbook.md). Hosting (2.3), DB cutover (2.4), and UAT/Prod vaults (2.1 partial) are ready to execute. |
 | 3 — React Dashboard MVP | **Done.** Removed from this doc; see `git log`. |
-| 4 — Client SDKs | **Near-complete.** Both SDKs scaffolded; JS SDK now auto-brackets sessions (Issue 4.11) with 27 passing tests. Issues 4.7 closed (won't-do) and 4.8 handed to 8.2 (Brandon confirmed 2026-04-30). Only remaining: SCH route-fixture re-run (4.2), deferred to Phase 6 cutover prep. |
+| 4 — Client SDKs | **Done for MVP.** Both SDKs scaffolded; JS SDK auto-brackets sessions (4.11) and SCH route-normalization audit landed (4.2 closed with a parity test set). Issues 4.7 closed (won't-do) and 4.8 handed to 8.2 (Brandon confirmed 2026-04-30). |
 | 5 — Session Timeline | **Partial.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`; 31 backend tests including chunked-IN-list and orphan-`/end` regressions. SDK auto-bracket gap closed via Issue 4.11. Outstanding: 5.2 benchmark spike not run; 5.5 end-to-end correlation-id verification owned by Phase 6.1. |
 | 6 — SCH Onboarding | Open. **Re-scoped 2026-04-30:** PostHog Phase 1 was never merged from `feature/posthog-implementation` into SCH `dev` or `main` (verified). PostHog migration is dropped; SCH onboards as a fresh integration. PostHog branches retained as scaffolding reference only. |
 | 7 — WMS Onboarding | Open. Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. |
@@ -288,14 +288,18 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 
 ### Issue 4.2 — FE route normalization: validate against SCH fixture set
 
-**Status:** the rules + token-threshold tuning are ported and unit-tested against a small fixture set including the `posthog-500-test` edge case. Outstanding: re-run the same normalizer against the *actual* SCH_UI fixture set (lives in the SCH repo) before SCH cutover, since that set is the validated regression suite.
+**Status:** **closed with an audit.** SCH_UI's `routeUtils.ts` (commit `cf7f65d`) vendored into [`packages/observability-client-js/src/__tests__/sch-fixtures/`](packages/observability-client-js/src/__tests__/sch-fixtures/) as a read-only reference. New [`schParity.test.ts`](packages/observability-client-js/src/__tests__/schParity.test.ts) runs 50 cases against a realistic SCH path set (drawn from `Layout.tsx` + `Reports.tsx`) and asserts both byte parity on static paths and the two intentional divergences below.
+
+The audit surfaced two real bugs in SCH_UI's normalizer that Adaptive-MAN's implementation avoids:
+1. SCH's `/[A-Za-z0-9_-]{20,}/` regex over-matches long literal segments (e.g. `/coordinator-dashboard` → `/:token`). Adaptive-MAN's per-segment check correctly leaves them literal.
+2. SCH applies `/\d+/ → :id` before its UUID regex, which strips a UUID's leading digit and prevents the UUID rule from matching. Adaptive-MAN's whole-segment UUID check is unaffected.
+
+These are improvements, not regressions — SCH cutover will see better normalization on those routes. The pinned tests will surface drift if anyone changes either side.
 
 **Acceptance criteria:**
-- [ ] SCH_UI route fixture set imported (vendored or test-only fetched) into `packages/observability-client-js/src/__tests__/`
-- [ ] All SCH fixtures pass against this normalizer with no diffs
-
-**Decisions needed:**
-- Vendor the fixture file into this repo, or run a one-off comparison from the SCH branch as a Phase 6 cutover prereq?
+- [x] SCH_UI route rules vendored into `packages/observability-client-js/src/__tests__/sch-fixtures/`
+- [x] Realistic SCH path set tested against this normalizer; divergences are intentional improvements, documented inline
+- [ ] (Folded into 6.3) Extend `FEATURE_AREA_RULES` or expose a runtime `featureAreaMap` option so SCH ships its richer feature-area map without forking the SDK
 
 ### Issue 4.7 — `RouteData`-aware path normalization
 
