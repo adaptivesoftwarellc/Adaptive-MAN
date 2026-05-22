@@ -6,22 +6,18 @@ secrets live in committed files.
 
 ## Vaults
 
-One vault per environment to limit blast radius:
+One dedicated vault per environment to limit blast radius:
 
 | Vault                       | Environment   | Soft-delete | Purge protection |
 |-----------------------------|---------------|-------------|------------------|
-| `AdaptiveToolsKeyVault`     | Development   | yes         | not enabled      |
+| `kv-observability-dev`      | Development   | yes         | not enabled      |
 | `kv-observability-uat`      | UAT           | yes         | recommended      |
 | `kv-observability-prod`     | Production    | yes         | **required**     |
 
-> **Dev deviation from the plan:** Phase 2 currently shares the existing
-> `AdaptiveToolsKeyVault` (centralus) for Development to avoid spinning up a
-> dedicated vault. All observability secrets are tagged `purpose=adaptive-observability`
-> so the operator can tell them apart from other tooling secrets. UAT and Prod must
-> still use dedicated `kv-observability-{env}` vaults — the isolation requirement
-> stands for any environment storing real PHI/PII-adjacent state. Cut over Dev to
-> a dedicated vault if/when the shared vault picks up principals that should not
-> see observability secrets.
+> Earlier in Phase 2 the placeholder secrets temporarily lived in the shared
+> `AdaptiveToolsKeyVault`. The dedicated `kv-observability-dev` replaces that
+> arrangement; see [`docs/azure-provisioning-runbook.md`](azure-provisioning-runbook.md)
+> for the actual provisioning commands.
 
 ## Required secrets per vault
 
@@ -41,22 +37,16 @@ is missing or any required secret is unbound.
 
 ## Provisioning a fresh environment
 
-The shape below is portal-equivalent; team should pick an IaC tool (Bicep/Terraform — see
-DEVELOPMENT_PLAN.md open question 2.1).
+End-to-end `az` CLI commands live in [`docs/azure-provisioning-runbook.md`](azure-provisioning-runbook.md). The shape:
 
-1. Create the resource group and vault:
-   - Region: same as the App Service (e.g. `eastus`).
-   - SKU: `standard`.
-   - Permission model: **RBAC** (Azure role-based access control), not access policies.
-   - Soft-delete: on. Retention 90 days. Purge protection on for `prod`.
-2. Create the App Service with **system-assigned managed identity** enabled.
-3. Grant the App Service's managed identity the `Key Vault Secrets User` role on its
-   same-environment vault. Do not grant cross-environment access.
-4. Add the four required secrets (see table above) using their exact names.
-5. Set `KeyVault:Uri` on the App Service:
-   - As an app setting: `KeyVault__Uri = https://kv-observability-{env}.vault.azure.net/`.
-6. Set `ASPNETCORE_ENVIRONMENT` to `UAT` or `Production` as appropriate.
-7. Deploy. On startup the API:
+1. Create the dedicated vault (region: same as the App Service; SKU `standard`; **RBAC**, not access policies; soft-delete 90d; purge protection on for `prod`).
+2. Create a **user-assigned** managed identity (Brandon's decision 2026-05-02 — one shared App Service Plan, per-env App Service instances). Attach it to the App Service via `az webapp identity assign --identities <mi-id>`.
+3. Grant the MI `Key Vault Secrets User` on its same-environment vault. Do not grant cross-environment access.
+4. Set `AZURE_CLIENT_ID` app setting to the MI's clientId so `DefaultAzureCredential` picks the right identity when multiple are attachable.
+5. Add the four required secrets (see table above) using their exact names.
+6. Set `KeyVault:Uri` on the App Service as `KeyVault__Uri = https://kv-observability-{env}.vault.azure.net/`.
+7. Set `ASPNETCORE_ENVIRONMENT` to `UAT` or `Production` as appropriate.
+8. Deploy. On startup the API:
    - Loads the vault into configuration.
    - Validates each required secret resolves to a non-empty string.
    - Logs `Critical` and refuses to start if any are missing in non-Development.
@@ -76,9 +66,9 @@ ASP.NET Core IConfiguration (overlaid on appsettings + env vars)
 DI: ObservabilityDbContext, ApiKeyHasher, ...
 ```
 
-`DefaultAzureCredential` resolves to the system-assigned MI in App Service, to the
-developer's Azure CLI/VS login locally, and to workload identity in container scenarios.
-No code change is needed across environments.
+`DefaultAzureCredential` resolves to the user-assigned MI in App Service (selected via the
+`AZURE_CLIENT_ID` app setting), to the developer's Azure CLI/VS login locally, and to
+workload identity in container scenarios. No code change is needed across environments.
 
 ## Local development
 
@@ -143,8 +133,8 @@ the prior version.
 
 ## Acceptance checklist (Issue 2.5)
 
-- [x] Step-by-step fresh-env setup
+- [x] Step-by-step fresh-env setup (see [`azure-provisioning-runbook.md`](azure-provisioning-runbook.md))
 - [x] Rotation runbooks (DB password, hash pepper, JWT key)
 - [x] Identity + secret flow documented
-- [ ] Bicep/Terraform module committed (open question — pick tool first)
+- [x] IaC tool decision — stay on `az` CLI scripts (Brandon, 2026-04-30)
 - [ ] Diagnostic logs + alert rules configured (Phase 8 cross-cut)

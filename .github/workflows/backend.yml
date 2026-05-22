@@ -11,6 +11,15 @@ on:
       - "backend/**"
       - ".github/workflows/backend.yml"
 
+# Public identifiers (not secrets) — discoverable from any deployed resource.
+# Auth security comes from the user-assigned MI's federated credentials, which
+# only trust tokens issued for this repo's main branch / pull_request runs.
+env:
+  AZURE_CLIENT_ID:       b44e6af5-9dd0-49c4-bd8d-5957a2e166dd
+  AZURE_TENANT_ID:       36e913b6-b1df-4592-a4f8-6f8ea39f7e20
+  AZURE_SUBSCRIPTION_ID: a21b1a73-9dce-458b-933c-b735703be5c4
+  AZURE_WEBAPP_NAME:     obs-api-dev
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -30,3 +39,63 @@ jobs:
         run: dotnet test tests/Observability.UnitTests/Observability.UnitTests.csproj --configuration Release --no-build --verbosity normal
       - name: Integration tests
         run: dotnet test tests/Observability.IntegrationTests/Observability.IntegrationTests.csproj --configuration Release --no-build --verbosity normal
+
+  deploy-dev:
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for OIDC federation with Azure
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Publish (linux-x64)
+        run: |
+          dotnet publish src/Observability.Api/Observability.Api.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained false \
+            -p:VersionSuffix=${GITHUB_SHA::8} \
+            -o ../publish
+      - name: Zip publish output
+        run: |
+          cd ../publish
+          zip -r ../publish.zip .
+      - name: Login to Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Set RELEASE_SHA app setting
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group AdaptiveTools \
+            --settings RELEASE_SHA=${GITHUB_SHA}
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: ../publish.zip
+      - name: Smoke /health
+        run: |
+          sleep 45
+          for i in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health")
+            if [ "$code" = "200" ]; then
+              echo "OK: /health = $code"
+              curl -s "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+              exit 0
+            fi
+            echo "Attempt $i: /health = $code, retry in 20s..."
+            sleep 20
+          done
+          echo "FAIL: /health did not return 200"
+          exit 1
