@@ -19,6 +19,7 @@ public static class KeyVaultConfiguration
         new("ApiKeyHashPepper",          "Observability:ApiKeyHashPepper"),
         new("JwtSigningKey",             "Observability:JwtSigningKey"),
         new("EncryptionKey",             "Observability:EncryptionKey"),
+        new("ObservabilityAdminKey",     "Observability:AdminApiKey"),
     };
 
     public static void AddKeyVaultIfConfigured(this WebApplicationBuilder builder)

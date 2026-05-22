@@ -16,6 +16,7 @@ public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Progr
     public string PublicKeyPlaintext { get; } = "aopub_test_public_key_xxxxxxxxxxxxxxxx";
     public string ServerKeyPlaintext { get; } = "aoserv_test_server_key_xxxxxxxxxxxxxxxx";
     public string RevokedKeyPlaintext { get; } = "aoserv_revoked_key_xxxxxxxxxxxxxxxxxxxx";
+    public string AdminKeyPlaintext { get; } = "test-admin-key-xxxxxxxxxxxxxxxxxxxx";
 
     private readonly string _dbName = $"obs-test-{Guid.NewGuid():N}";
     private int _seeded;
@@ -30,6 +31,7 @@ public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Progr
             {
                 ["ConnectionStrings:ObservabilityDb"] = "InMemory",
                 ["Observability:ApiKeyHashPepper"] = "test-pepper",
+                ["Observability:AdminApiKey"] = AdminKeyPlaintext,
             });
         });
 

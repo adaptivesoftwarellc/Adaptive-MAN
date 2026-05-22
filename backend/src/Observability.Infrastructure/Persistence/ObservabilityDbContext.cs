@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Observability.Domain.Applications;
+using Observability.Domain.Audit;
 using Observability.Domain.Telemetry;
 using DomainApplication = Observability.Domain.Applications.Application;
 
@@ -17,6 +18,7 @@ public class ObservabilityDbContext : DbContext
     public DbSet<SafetyViolation> SafetyViolations => Set<SafetyViolation>();
     public DbSet<BackgroundJobFailure> BackgroundJobFailures => Set<BackgroundJobFailure>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -119,6 +121,18 @@ public class ObservabilityDbContext : DbContext
             e.Property(x => x.ReleaseSha).HasMaxLength(64);
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.SessionId }).IsUnique();
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.LastSeenAt });
+        });
+
+        b.Entity<AuditLog>(e =>
+        {
+            e.ToTable("AuditLogs");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Action).HasMaxLength(64).IsRequired();
+            e.Property(x => x.ActorType).HasMaxLength(32).IsRequired();
+            e.Property(x => x.CorrelationId).HasMaxLength(64);
+            e.Property(x => x.DetailsJson).HasColumnType("nvarchar(max)").IsRequired();
+            e.HasIndex(x => x.OccurredAt);
+            e.HasIndex(x => new { x.Action, x.OccurredAt });
         });
     }
 }

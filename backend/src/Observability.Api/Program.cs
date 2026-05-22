@@ -56,6 +56,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapHealthEndpoints();
 app.MapDashboardEndpoints();
+app.MapAdminEndpoints();
 
 var ingest = app.MapGroup("/api/ingest").AddApiKeyAuth();
 ingest.MapIngestionEndpoints();
