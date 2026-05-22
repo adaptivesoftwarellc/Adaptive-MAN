@@ -23,6 +23,7 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<IApiKeyHasher, ApiKeyHasher>();
+        services.AddSingleton<IApiKeyGenerator, ApiKeyGenerator>();
         services.AddScoped<IApiKeyResolver, ApiKeyResolver>();
         services.AddScoped<IIngestionStore, IngestionStore>();
         services.AddSingleton<IPropertyAllowlistValidator, PropertyAllowlistValidator>();
