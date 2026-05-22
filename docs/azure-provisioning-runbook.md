@@ -6,9 +6,39 @@ Run as the **subscription Owner / Contributor + User Access Administrator**. The
 
 UAT and Prod follow the same shape — repeat with the env-specific names below once Dev is verified.
 
-## Inputs
+## Dev quick-start — Arlo, shared `AdaptiveToolsKeyVault`
 
-Edit these once, then paste each section:
+Tailored values for the current Dev provisioning pass. RG-Contributor + Secrets Officer on the shared vault — you can run sections 2, 3, 4 yourself; you'll need one role-assignment line from someone with vault Owner / User Access Administrator (see §1 grant block).
+
+```powershell
+$Subscription = "Adaptive Subscription"
+$Tenant       = "36e913b6-b1df-4592-a4f8-6f8ea39f7e20"
+$Location     = "centralus"
+$Rg           = "AdaptiveTools"
+$Env          = "dev"
+$KvName       = "AdaptiveToolsKeyVault"          # using the shared vault for Dev
+$MiName       = "id-observability-dev"
+$PlanName     = "asp-adaptive-shared"
+$PlanSku      = "B1"
+$AppName      = "obs-api-dev"
+$SqlServer    = "adaptivetoolssql"
+$DbName       = "ObservabilityDev"
+$DbMaxSizeGb  = 32
+
+az account set --subscription "$Subscription"
+```
+
+**Section map for this run:**
+- **§1 Key Vault** — skip the `az keyvault create` and the four `secret set` lines (already in place from 2026-04-30 seed). The `Key Vault Administrator` self-grant is optional (you already have Secrets Officer + User on this vault).
+- **§2 User-Assigned MI** — run as-is.
+- **§2 grant MI Key Vault Secrets User** — **needs vault Owner / User Access Administrator** to run. After §2 finishes, capture the MI `principalId` and the vault resourceId; the role-assignment command is one line — send it to whoever has the perm.
+- **§3 App Service Plan + App Service** — run as-is.
+- **§4 SQL** — run §4a (firewall), §4b (DB), §4c (T-SQL — promote yourself to AAD admin on `$SqlServer` first via `az sql server ad-admin create --display-name "Arlo" --object-id (az ad signed-in-user show --query id -o tsv) --server $SqlServer -g $Rg`), §4d (real connection string into KV).
+- **§5 Deploy + smoke** — run as-is.
+
+## Inputs (generic reference, all envs)
+
+Edit these once, then paste each section. The block above is the pre-filled Dev variant.
 
 ```powershell
 $Subscription   = "Adaptive Subscription"        # az account show
