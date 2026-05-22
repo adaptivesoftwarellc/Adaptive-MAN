@@ -9,6 +9,8 @@ obj/
 *.swp
 artifacts/
 TestResults/
+publish/
+publish.zip
 
 # Node
 node_modules/
