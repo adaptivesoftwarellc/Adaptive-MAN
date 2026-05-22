@@ -79,6 +79,18 @@ Phase 4 ships only the no-op adapter and the type contract — no `rrweb` depend
 | `getSessionId()` | The shared id used by replay (Phase 9) and session timeline (Phase 5). |
 | `reset()` | New session id, clear distinct id (call on logout). |
 
+## Live ingest smoke check (4.11 closure harness)
+
+[`scripts/live-ingest-check.mjs`](scripts/live-ingest-check.mjs) is a standalone Node harness that boots the SDK against a real ingestion API, emits one event, calls `shutdown()`, and asserts that the `Sessions` row exists with `started_at` / `last_seen_at` / `ended_at` populated. Use it to close the 4.11 deferred integration test against `obs-api-dev` (or any environment) without standing up a browser.
+
+```bash
+OBS_INGEST_URL=https://obs-api-dev.azurewebsites.net \
+OBS_API_KEY=aopub_xxx \
+node scripts/live-ingest-check.mjs
+```
+
+Exit code 0 = pass. The SDK must be built first (`npm run build`).
+
 ## PostHog migration cheatsheet
 
 | PostHog (current SCH) | Adaptive (this SDK) |
