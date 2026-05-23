@@ -1,5 +1,5 @@
 {
-  "name": "@adaptive/observability-client-js",
+  "name": "@adaptivesoftwarellc/observability-client-js",
   "version": "0.1.0",
   "description": "Adaptive Observability frontend SDK. API surface mirrors SCH's analytics.ts so PostHog migration is import-line-only.",
   "type": "module",

@@ -3,12 +3,12 @@ name: sdk-publish
 # Publishes Adaptive Observability SDKs.
 #
 # Triggers:
-#   * Tag push matching `client-js-v*`     → publishes @adaptive/observability-client-js to npm
+#   * Tag push matching `client-js-v*`     → publishes @adaptivesoftwarellc/observability-client-js to npm
 #   * Tag push matching `client-dotnet-v*` → publishes Adaptive.ObservabilityClient to NuGet
 #   * Manual dispatch (choose which package + dry-run flag)
 #
 # Required repository secrets:
-#   NPM_TOKEN       — npmjs.org automation token with publish rights on the `@adaptive` scope
+#   NPM_TOKEN       — npmjs.org automation token with publish rights on the `@adaptivesoftwarellc` scope
 #   NUGET_API_KEY   — nuget.org API key scoped to `Adaptive.ObservabilityClient`
 #
 # Versioning convention:
@@ -54,7 +54,7 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-          scope: "@adaptive"
+          scope: "@adaptivesoftwarellc"
           cache: "npm"
           cache-dependency-path: packages/observability-client-js/package-lock.json
       - run: npm ci
@@ -70,7 +70,7 @@ jobs:
             echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
             exit 1
           fi
-          echo "Publishing @adaptive/observability-client-js@$PKG_VERSION"
+          echo "Publishing @adaptivesoftwarellc/observability-client-js@$PKG_VERSION"
 
       - name: npm publish (dry-run)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'

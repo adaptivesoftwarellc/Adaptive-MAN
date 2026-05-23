@@ -8,7 +8,7 @@ Inventory of the PostHog scaffolding on `SCH_UI@feature/posthog-implementation` 
 
 | Path | What it does | Port target |
 |---|---|---|
-| `sch-ui/src/services/analytics.ts` | Typed PostHog wrapper: `captureEvent()`, `identifyUser()`, `resetUser()`, `capturePage()` with compile-time `AllowedEventProperties` enforcement. Swallows errors. | Rewrite implementation against `@adaptive/observability-client-js`; keep the export shape identical so call sites don't change. |
+| `sch-ui/src/services/analytics.ts` | Typed PostHog wrapper: `captureEvent()`, `identifyUser()`, `resetUser()`, `capturePage()` with compile-time `AllowedEventProperties` enforcement. Swallows errors. | Rewrite implementation against `@adaptivesoftwarellc/observability-client-js`; keep the export shape identical so call sites don't change. |
 | `sch-ui/src/utils/routeUtils.ts` | `normalizeRoute()` (strips `:id`, `:uuid`, `:token`), `routeToFeatureArea()` (12 app sections), `normalizeEndpoint()`. | Either delegate to the SDK's normalizer (`Adaptive-MAN/packages/observability-client-js/src/route.ts`) or keep verbatim — the SDK's per-segment check is a strict improvement, see [DEVELOPMENT_PLAN.md:312](../../DEVELOPMENT_PLAN.md#L312). Decision: thin wrapper that calls SDK + appends SCH's richer `featureAreaMap`. |
 
 ## B. Files modified (5)
@@ -17,7 +17,7 @@ Inventory of the PostHog scaffolding on `SCH_UI@feature/posthog-implementation` 
 |---|---|---|
 | `sch-ui/src/main.tsx` | ~20 lines: PostHog init, gated on `VITE_POSTHOG_KEY`/`VITE_POSTHOG_HOST`; session-recording UAT-only; super-properties `app: 'sch-ui'` + `environment`. | Replace with `init({ key, host, app: 'sch-ui', env, debug })` call into adaptive SDK. Session recording / super-properties → drop (replay is Phase 9; env stamping is server-side). |
 | `sch-ui/src/App.tsx` | ~60 lines: `RouteTracker` fires `capturePage()` on route change with normalized route + feature_area; global `error`/`unhandledrejection` listeners emit `frontend_exception`. | Port verbatim — call signature matches the SDK. |
-| `sch-ui/src/services/apiClient.ts` | ~25 lines: Axios response interceptor emits `api_request_failed` with `status_code`, `endpoint_group`, `method`, `correlation_id`, `is_network_error`. | Replace inline `posthog.capture` with `import { captureFailedRequest } from '@adaptive/observability-client-js/axios'`. The SDK's axios entry point already provides this. |
+| `sch-ui/src/services/apiClient.ts` | ~25 lines: Axios response interceptor emits `api_request_failed` with `status_code`, `endpoint_group`, `method`, `correlation_id`, `is_network_error`. | Replace inline `posthog.capture` with `import { captureFailedRequest } from '@adaptivesoftwarellc/observability-client-js/axios'`. The SDK's axios entry point already provides this. |
 | `sch-ui/src/store/authStore.ts` | ~7 lines: on login, calls `identifyUser(userId, { roles, has_provider_link })` + fires `auth_login_success`; on logout, fires `auth_logout` + `posthog.reset()`. | Port verbatim — `roles` audit (Issue 6.1 prereq) must confirm role strings are generic. `posthog.reset()` becomes `analytics.reset()`. |
 | `sch-ui/src/components/common/ErrorBoundary.tsx` | ~8 lines: `componentDidCatch` fires `frontend_exception` with `source: 'ErrorBoundary'`, `error_type`, `component_stack_depth`. | Port verbatim. |
 
@@ -34,7 +34,7 @@ Inventory of the PostHog scaffolding on `SCH_UI@feature/posthog-implementation` 
 
 | Add | Remove |
 |---|---|
-| `@adaptive/observability-client-js` (peer-loaded `axios` already in SCH; peer-loaded `react` already in SCH) | `posthog-js` — must not enter `package.json` per Issue 6.3 acceptance criteria |
+| `@adaptivesoftwarellc/observability-client-js` (peer-loaded `axios` already in SCH; peer-loaded `react` already in SCH) | `posthog-js` — must not enter `package.json` per Issue 6.3 acceptance criteria |
 
 `package-lock.json` regenerates as part of the integration PR.
 
@@ -64,5 +64,5 @@ None. All 5 modified files exist on `dev` without analytics instrumentation; che
 ## H. Open items feeding Issue 6.3
 
 - **Decision needed at cherry-pick time:** import `routeUtils.ts` verbatim, or delete it and call the SDK's normalizer? Recommended: keep SCH's `featureAreaMap` (richer than SDK default) and delegate the path-stripping to the SDK.
-- **SDK install method:** `@adaptive/observability-client-js@0.1.0` is unpublished as of 2026-05-22. Issue 6.3 cannot start until the SDK is on npm. See [`.github/workflows/sdk-publish.yml`](../../.github/workflows/sdk-publish.yml) for the publish pipeline; user must add `NPM_TOKEN` secret.
+- **SDK install method:** `@adaptivesoftwarellc/observability-client-js@0.1.0` is unpublished as of 2026-05-22. Issue 6.3 cannot start until the SDK is on npm. See [`.github/workflows/sdk-publish.yml`](../../.github/workflows/sdk-publish.yml) for the publish pipeline; user must add `NPM_TOKEN` secret.
 - **Session bracketing:** SDK auto-brackets sessions per Issue 4.11. No manual `init({ trackSessions: false })` opt-out for SCH.

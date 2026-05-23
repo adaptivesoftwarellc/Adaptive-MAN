@@ -1,4 +1,4 @@
-# @adaptive/observability-client-js
+# @adaptivesoftwarellc/observability-client-js
 
 Frontend SDK for the Adaptive Observability platform.
 
@@ -7,14 +7,14 @@ The public surface mirrors `sch-ui/src/services/analytics.ts` so the SCH PostHog
 ## Install
 
 ```bash
-npm install @adaptive/observability-client-js
+npm install @adaptivesoftwarellc/observability-client-js
 ```
 
 ## Quickstart (under 50 LOC)
 
 ```ts
 // src/main.tsx (or wherever your app boots)
-import * as observability from "@adaptive/observability-client-js";
+import * as observability from "@adaptivesoftwarellc/observability-client-js";
 
 observability.init({
   ingestUrl: import.meta.env.VITE_OBSERVABILITY_URL!,
@@ -40,7 +40,7 @@ See [`docs/privacy-rules.md`](../../docs/privacy-rules.md) for what you may NOT 
 
 ```ts
 import axios from "axios";
-import { attachAxiosInterceptor } from "@adaptive/observability-client-js/axios";
+import { attachAxiosInterceptor } from "@adaptivesoftwarellc/observability-client-js/axios";
 
 const api = axios.create({ baseURL: "/api" });
 attachAxiosInterceptor(api);
@@ -51,7 +51,7 @@ Captures `endpoint_group`, `method`, `http_status_code`, `is_network_error`, and
 ## Optional: React error boundary
 
 ```tsx
-import { ObservabilityErrorBoundary } from "@adaptive/observability-client-js/react";
+import { ObservabilityErrorBoundary } from "@adaptivesoftwarellc/observability-client-js/react";
 
 <ObservabilityErrorBoundary fallback={<p>Something went wrong.</p>}>
   <App />
@@ -62,7 +62,7 @@ NEVER sends `error.message`, `error.stack`, or React `componentStack` text. Only
 
 ## Replay slot (Phase 9)
 
-Phase 4 ships only the no-op adapter and the type contract — no `rrweb` dependency yet. Phase 9 will drop in an rrweb-backed adapter at `@adaptive/observability-client-js/replay` without breaking SemVer.
+Phase 4 ships only the no-op adapter and the type contract — no `rrweb` dependency yet. Phase 9 will drop in an rrweb-backed adapter at `@adaptivesoftwarellc/observability-client-js/replay` without breaking SemVer.
 
 ## API surface
 
