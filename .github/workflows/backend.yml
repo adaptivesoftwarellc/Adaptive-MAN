@@ -10,6 +10,7 @@ on:
     paths:
       - "backend/**"
       - ".github/workflows/backend.yml"
+  workflow_dispatch:
 
 # Public identifiers (not secrets) — discoverable from any deployed resource.
 # Per-env client ids live on the per-job `env:` block. Auth security comes from

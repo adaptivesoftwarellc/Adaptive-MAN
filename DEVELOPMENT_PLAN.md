@@ -26,7 +26,7 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 | 3 — React Dashboard MVP | **Done.** Removed from this doc; see `git log`. |
 | 4 — Client SDKs | **Done for MVP.** Both SDKs scaffolded; JS SDK auto-brackets sessions (4.11) and SCH route-normalization audit landed (4.2 closed with a parity test set). Issues 4.7 closed (won't-do) and 4.8 handed to 8.2 (Brandon confirmed 2026-04-30). |
 | 5 — Session Timeline | **Hardened.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`. SDK auto-bracket gap closed via Issue 4.11. **5.7 landed (2026-05-22):** full 8-cell benchmark grid run before/after on local Docker MSSQL; `Phase5HardeningIndexes` additive migration ships `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` + `Errors(ApplicationId, EnvironmentId, LastCorrelationId)`. p95 stays under 200ms through the 10k-events/session architecture-doc upper bound; 100k cell confirms the documented materialization boundary (see [`docs/perf.md`](docs/perf.md)). **4.11 live-ingest harness PASSED end-to-end against `obs-api-dev` (2026-05-22)** using a public key minted via the Phase 8.9 admin endpoints. Outstanding: 5.5 cross-process correlation verification owned by Phase 6.1; re-run grid against Azure SQL Dev (now unblocked — `ObservabilityDev` is live). |
-| 6 — SCH Onboarding | Open. **Re-scoped 2026-04-30:** PostHog Phase 1 was never merged from `feature/posthog-implementation` into SCH `dev` or `main` (verified). PostHog migration is dropped; SCH onboards as a fresh integration. PostHog branches retained as scaffolding reference only. |
+| 6 — SCH Onboarding | Open. **Re-scoped 2026-04-30:** PostHog Phase 1 was never merged from `feature/posthog-implementation` into SCH `dev` or `main` (verified). PostHog migration is dropped; SCH onboards as a fresh integration. PostHog branches retained as scaffolding reference only. **Soak shape (Option A, 2026-05-22):** 5-business-day SCH Dev → `obs-api-dev` shakedown replaces UAT soak (platform has no UAT env). **Session A landing (2026-05-22):** audits 6.2 + 6.4 shipped to `docs/audits/`; SDK publish workflow added (`.github/workflows/sdk-publish.yml`); `workflow_dispatch` added to `backend.yml` for manual prod-deploy retry. **Session B blocked on:** (1) `NPM_TOKEN` + `NUGET_API_KEY` repo secrets configured; (2) first SDK publish via `client-js-v0.1.0` + `client-dotnet-v0.1.0` tags (or `workflow_dispatch` dry-run first). |
 | 7 — WMS Onboarding | Open. Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. |
 | 8 – 9 | Open. Documented below. |
 
@@ -401,9 +401,11 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 **Re-scope decision (2026-04-30):** `feature/posthog-implementation` was never merged into SCH_API or SCH_UI's `dev`/`main` (verified: branch is 4 commits ahead of `dev` on each repo, contained in no other branch; `dev` has zero PostHog references outside `POSTHOG_EVENT_CATALOG.md`). The PostHog Phase 1 work is therefore reference scaffolding, not a live integration. SCH onboards onto adaptive-observability as a fresh integration. Dual-write parity, PostHog cutover, and PostHog dependency removal (former 6.6 / 6.7 / 6.8) are dropped from scope.
 
+**Soak shape (2026-05-22, Option A):** Platform itself ships Dev + Prod only (Phase 2 re-scope). SCH's own UAT environment, if used during onboarding, emits to **adaptive-observability Dev** — there is no adaptive-observability UAT env to receive it. The pre-cutover gate is therefore a **5-business-day SCH Dev shakedown** against `obs-api-dev`, not a UAT soak.
+
 **Goal:** Ship SCH_UI + SCH_API onto adaptive-observability as the first onboarded app pair, leveraging the unmerged PostHog branches as scaffolding for emission points (event names, identity rules, ErrorBoundary, Axios interceptor, GlobalExceptionMiddleware, BG-service catch blocks).
 
-**Exit criteria:** SCH_UI + SCH_API emit the Phase 1 event set to adaptive-observability UAT for 5 business days with zero `SafetyViolations`; privacy reviewer sign-off committed; Prod stable for 1 week.
+**Exit criteria:** SCH_UI + SCH_API emit the Phase 1 event set to adaptive-observability Dev for 5 business days with zero `SafetyViolations`; privacy reviewer sign-off committed; Prod stable for 1 week.
 
 **Strategy:** Cherry-pick the analytics scaffolding from `feature/posthog-implementation` into a new `feature/adaptive-observability` branch on each SCH repo, replacing PostHog SDK calls with `observability-client-{js,dotnet}` calls. The SCH `IAnalyticsService` interface is replaced by the SDK's own (under `Adaptive.ObservabilityClient`); SCH adopts that one rather than its local copy.
 
@@ -412,9 +414,9 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 **Acceptance criteria:**
 - [ ] 4.11 (SDK auto-bracket sessions) shipped — without this, SCH `Sessions` rows are never written and Phase 5 timelines stay empty
 - [ ] 4.2 (SCH route fixture port) — port the validated regression suite from SCH_UI's `routeUtils.ts` tests into `packages/observability-client-js/src/__tests__/`
-- [ ] 5.5 verification harness — trace one SCH UAT request FE → BE → ingestion and confirm the same correlation id lands on both `api_request_failed` (FE) and `server_error_occurred` (BE)
+- [ ] 5.5 verification harness — trace one SCH Dev request FE → BE → ingestion and confirm the same correlation id lands on both `api_request_failed` (FE) and `server_error_occurred` (BE)
 - [x] EF `Initial` migration generated and `EnsureCreatedAsync` switched to `MigrateAsync` (owned by Phase 2.4) — required before the first non-Dev deploy *(shipped `75ef382`)*
-- [ ] Phase 2.3 hosting + 2.4 DB cutover at least Dev+UAT — without these the API has nowhere to receive SCH events
+- [x] Phase 2.3 hosting + 2.4 DB cutover at least Dev — required for SCH Dev shakedown to have somewhere to ingest *(Dev live 2026-05-22; Prod pending first CI deploy)*
 - [ ] BG job dedup confirmed working in SCH_API integration (4.8 static 15-min default acceptable; per-app override deferred to 8.2)
 - [ ] `release_sha` populated in SCH_API + SCH_UI deployed envs via CI build-time injection
 - [ ] Generic role names audit on `auth_login_success` (no user-specific labels)
@@ -423,10 +425,11 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 ### Issue 6.2 — Audit SCH_UI integration touchpoints
 **Description:** Catalog files that change in the new `feature/adaptive-observability` branch off `dev`. Expected (mirrors the unmerged PostHog scaffolding): `services/analytics.ts`, `utils/routeUtils.ts`, `main.tsx`, `App.tsx`, `services/apiClient.ts`, `store/authStore.ts`, `components/common/ErrorBoundary.tsx`, env files.
+**Status:** **Done 2026-05-22.** See [`docs/audits/sch-ui.md`](docs/audits/sch-ui.md).
 **Acceptance criteria:**
-- [ ] `docs/audits/sch-ui.md` lists every file added/modified
-- [ ] Lists every env var added (`VITE_OBSERVABILITY_*`)
-- [ ] Confirms no PostHog packages enter `package.json`
+- [x] `docs/audits/sch-ui.md` lists every file added/modified (2 added, 5 modified)
+- [x] Lists every env var added (`VITE_OBSERVABILITY_KEY`, `VITE_OBSERVABILITY_HOST` — replace unmerged `VITE_POSTHOG_*`)
+- [x] Confirms no PostHog packages enter `package.json` (`posthog-js` removed from cherry-pick scope)
 
 ### Issue 6.3 — Implement adaptive-observability in SCH_UI
 **Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and rewire onto `observability-client-js`. The SDK API surface mirrors the PostHog branch's `analytics.ts` so most scaffolding ports unchanged; PostHog imports and `posthog.*` direct calls are replaced.
@@ -439,10 +442,11 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 ### Issue 6.4 — Audit SCH_API integration touchpoints
 **Description:** Catalog files that change. Expected: `Program.cs` (DI), `appsettings.json` (`AdaptiveObservability` section), new `AdaptiveObservabilityService` (or direct SDK consumption), `GlobalExceptionMiddleware.cs`, all 8 BG services.
+**Status:** **Done 2026-05-22.** See [`docs/audits/sch-api.md`](docs/audits/sch-api.md).
 **Acceptance criteria:**
-- [ ] `docs/audits/sch-api.md` lists every file added/modified
-- [ ] Lists every config key added
-- [ ] Confirms no `PostHog.AspNetCore` reference enters `SCH.Infrastructure.csproj`
+- [x] `docs/audits/sch-api.md` lists every file added/modified (5 deleted, 4 modified, 8 BG services modified)
+- [x] Lists every config key added (`AdaptiveObservability:ServerApiKey/Enabled/IngestionBaseUrl/Environment/ReleaseSha`)
+- [x] Confirms no `PostHog.AspNetCore` reference enters `SCH.Infrastructure.csproj` (replaced by `Adaptive.ObservabilityClient`)
 
 ### Issue 6.5 — Implement adaptive-observability in SCH_API
 **Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and wire to the SDK's `AddAdaptiveObservability(...)`. SCH adopts the SDK's own `IAnalyticsService` (under `Adaptive.ObservabilityClient`) rather than its local copy from the unmerged PostHog branch.
@@ -461,12 +465,12 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 - [ ] Public + server API keys provisioned and stored in SCH's secret stores (Key Vault)
 - [ ] Smoke event from each environment lands in adaptive-observability with correct app/env attribution
 
-### Issue 6.7 — UAT soak + privacy validation
-**Description:** Replaces former dual-write parity gate. SCH UAT runs on adaptive-observability for 5 business days; daily safety-violation check.
+### Issue 6.7 — Dev shakedown soak + privacy validation
+**Description:** Replaces former dual-write parity gate. **Option A (2026-05-22):** SCH Dev runs against `obs-api-dev` for 5 business days; daily safety-violation check. No UAT step — platform has no UAT environment.
 **Acceptance criteria:**
-- [ ] 5 business days of UAT traffic
+- [ ] 5 business days of SCH Dev traffic emitted to `obs-api-dev`
 - [ ] Zero `SafetyViolations` rows
-- [ ] Daily soak log committed (`docs/migration/sch-uat-soak.md`)
+- [ ] Daily soak log committed (`docs/migration/sch-dev-shakedown.md`)
 - [ ] Privacy/compliance reviewer sign-off committed
 
 ### Issue 6.8 — SCH Prod cutover
@@ -830,8 +834,8 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 ## Cross-Cutting
 
 ### Privacy review gates
-- **Before Phase 6 SCH UAT entry:** event catalog committed in adaptive-observability matches the Phase 1 event set inherited from `POSTHOG_EVENT_CATALOG.md`; route-normalization fixtures from SCH_UI ported (4.2).
-- **Before Phase 6 SCH Prod cutover:** 5 business days UAT with zero `SafetyViolations`; privacy/compliance reviewer sign-off committed.
+- **Before Phase 6 SCH Dev shakedown entry:** event catalog committed in adaptive-observability matches the Phase 1 event set inherited from `POSTHOG_EVENT_CATALOG.md`; route-normalization fixtures from SCH_UI ported (4.2).
+- **Before Phase 6 SCH Prod cutover:** 5 business days SCH Dev → `obs-api-dev` shakedown with zero `SafetyViolations`; privacy/compliance reviewer sign-off committed.
 - **Before Phase 7 WMS UAT entry:** `WMS_EVENT_CATALOG.md` committed with WMS-specific never-record routes; MSAL identity rule (7.4) recorded in `docs/identity-rules.md`; correlation-ID end-to-end test (7.5) green.
 - **Before Phase 9 (replay) entry:** rrweb dependency approved; masking policy reviewed; Blob storage topology decided; `docs/replay.md` committed.
 - **Before Phase 9 prod enablement (per-app):** 2-week UAT masking audit clean; `ReplayViewer` RBAC in place; replay-specific retention job verified; admin-set `ApprovedForProductionAt` recorded.
@@ -849,7 +853,7 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 ### Verification (end-to-end test plan)
 1. CI runs unit + integration tests on every PR.
 2. **Phase 4 / 7 specific:** SDK quickstart emits each Phase 1 event; dashboard shows them under the correct app/env; submitting an unsafe event (`{ "email": "x@y.com" }`) returns 422 and writes a `SafetyViolations` row with no `Events` row.
-3. **Phase 6 specific:** SCH UAT runs on adaptive-observability for 5 business days with zero `SafetyViolations` and the privacy reviewer sign-off committed before Prod cutover. (Former dual-write parity gate dropped — see Phase 6 re-scope decision.)
+3. **Phase 6 specific:** SCH Dev shakedown emits to `obs-api-dev` for 5 business days with zero `SafetyViolations` and the privacy reviewer sign-off committed before Prod cutover (Option A, 2026-05-22; former UAT-soak shape dropped with the platform's UAT environment).
 4. **Phase 7 specific:** WMS end-to-end correlation-ID test (7.5) green — same id appears on both FE `api_request_failed` and BE `server_error_occurred` from one user-action trigger.
 
 ### Still-open cross-cutting questions
