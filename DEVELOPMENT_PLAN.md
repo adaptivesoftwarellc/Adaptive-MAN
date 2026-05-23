@@ -2,6 +2,8 @@
 
 > Internal analytics, error-tracking, and session-timeline platform. Replaces an already-shipped PostHog Phase 1 integration in SCH with a custom system that onboards multiple internal apps under strict PHI/PII rules.
 
+> **TODO (blocked on repo admin):** Configure the `prod` **GitHub Environment** in repo Settings → Environments. Add required reviewers (Arlo at minimum; Brandon optional). Without this the `deploy-prod` job in `.github/workflows/backend.yml` will fail-closed on every push to main — the federated credential for `id-observability-prod` only trusts tokens whose OIDC subject includes `environment:prod`. Arlo doesn't have admin on `adaptivesoftwarellc/Adaptive-MAN` yet; waiting on Brandon to grant repo admin (or to do the env config himself). Once configured, the first Prod CI deploy completes the last Prod acceptance criterion in 2.4.
+
 ## Goal
 
 Build a standalone repo that ingests safe events/errors from frontend + backend SDKs, persists them in Azure SQL, surfaces them in a React admin dashboard, and supports per-app onboarding with environment-specific keys and allowlists. Migrate SCH off PostHog onto this platform without losing any signal already captured.
