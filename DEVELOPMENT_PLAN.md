@@ -79,7 +79,7 @@ These are **inputs**, not duplicated work. The plan references them throughout.
 - Dev-only test endpoint (was `/api/dev/posthog-test`) locked to Development only and renamed
 - Generic role names audit (no user-specific labels)
 - Correlation ID confirmed as true request trace ID end-to-end
-- `.env.example` updated with `VITE_OBSERVABILITY_KEY` / `VITE_OBSERVABILITY_HOST` (replaces unmerged `VITE_POSTHOG_*`)
+- `.env.example` updated with `VITE_OBSERVABILITY_KEY` / `VITE_OBSERVABILITY_URL` (replaces unmerged `VITE_POSTHOG_*`)
 - UAT replay masking audit before any prod replay discussion
 - `PostHog.AspNetCore v2.5.0` pre-release dependency: **no longer a risk** — it never reached SCH `dev`/`main`. Branches retained for scaffolding reference only.
 
@@ -420,7 +420,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 - [ ] BG job dedup confirmed working in SCH_API integration (4.8 static 15-min default acceptable; per-app override deferred to 8.2)
 - [ ] `release_sha` populated in SCH_API + SCH_UI deployed envs via CI build-time injection
 - [ ] Generic role names audit on `auth_login_success` (no user-specific labels)
-- [ ] `.env.example` in SCH_UI includes `VITE_OBSERVABILITY_KEY` / `VITE_OBSERVABILITY_HOST`
+- [ ] `.env.example` in SCH_UI includes `VITE_OBSERVABILITY_KEY` / `VITE_OBSERVABILITY_URL`
 - [ ] Dev-only test endpoint (was `/api/dev/posthog-test`) replaced with `/api/dev/observability-test`, confirmed unreachable outside Development
 
 ### Issue 6.2 — Audit SCH_UI integration touchpoints
@@ -428,7 +428,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 **Status:** **Done 2026-05-22.** See [`docs/audits/sch-ui.md`](docs/audits/sch-ui.md).
 **Acceptance criteria:**
 - [x] `docs/audits/sch-ui.md` lists every file added/modified (2 added, 5 modified)
-- [x] Lists every env var added (`VITE_OBSERVABILITY_KEY`, `VITE_OBSERVABILITY_HOST` — replace unmerged `VITE_POSTHOG_*`)
+- [x] Lists every env var added (`VITE_OBSERVABILITY_KEY`, `VITE_OBSERVABILITY_URL` — replace unmerged `VITE_POSTHOG_*`)
 - [x] Confirms no PostHog packages enter `package.json` (`posthog-js` removed from cherry-pick scope)
 
 ### Issue 6.3 — Implement adaptive-observability in SCH_UI
@@ -445,7 +445,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 **Status:** **Done 2026-05-22.** See [`docs/audits/sch-api.md`](docs/audits/sch-api.md).
 **Acceptance criteria:**
 - [x] `docs/audits/sch-api.md` lists every file added/modified (5 deleted, 4 modified, 8 BG services modified)
-- [x] Lists every config key added (`AdaptiveObservability:ServerApiKey/Enabled/IngestionBaseUrl/Environment/ReleaseSha`)
+- [x] Lists every config key added (`AdaptiveObservability:ApiKey/Enabled/HostUrl/Environment/ReleaseSha` — names match the SDK's `AdaptiveObservabilityOptions` so binding is `services.Configure<AdaptiveObservabilityOptions>(config.GetSection("AdaptiveObservability"))` with no remapping)
 - [x] Confirms no `PostHog.AspNetCore` reference enters `SCH.Infrastructure.csproj` (replaced by `Adaptive.ObservabilityClient`)
 
 ### Issue 6.5 — Implement adaptive-observability in SCH_API

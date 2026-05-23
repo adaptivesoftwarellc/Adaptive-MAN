@@ -15,9 +15,9 @@ Inventory of the PostHog scaffolding on `SCH_UI@feature/posthog-implementation` 
 
 | Path | Adds | Cherry-pick? |
 |---|---|---|
-| `sch-ui/src/main.tsx` | ~20 lines: PostHog init, gated on `VITE_POSTHOG_KEY`/`VITE_POSTHOG_HOST`; session-recording UAT-only; super-properties `app: 'sch-ui'` + `environment`. | Replace with `init({ key, host, app: 'sch-ui', env, debug })` call into adaptive SDK. Session recording / super-properties → drop (replay is Phase 9; env stamping is server-side). |
+| `sch-ui/src/main.tsx` | ~20 lines: PostHog init, gated on `VITE_POSTHOG_KEY`/`VITE_POSTHOG_HOST`; session-recording UAT-only; super-properties `app: 'sch-ui'` + `environment`. | Replace with `init({ ingestUrl, apiKey, environment, releaseSha, debug })` call into adaptive SDK (signature from [`packages/observability-client-js/src/index.ts`](../../packages/observability-client-js/src/index.ts) `InitOptions`). Map from `VITE_OBSERVABILITY_URL`/`VITE_OBSERVABILITY_KEY`. Session recording → drop (replay is Phase 9). Super-properties (`app`) are not part of `InitOptions` — multi-app attribution comes from the server-side `applicationId` resolved off the API key. |
 | `sch-ui/src/App.tsx` | ~60 lines: `RouteTracker` fires `capturePage()` on route change with normalized route + feature_area; global `error`/`unhandledrejection` listeners emit `frontend_exception`. | Port verbatim — call signature matches the SDK. |
-| `sch-ui/src/services/apiClient.ts` | ~25 lines: Axios response interceptor emits `api_request_failed` with `status_code`, `endpoint_group`, `method`, `correlation_id`, `is_network_error`. | Replace inline `posthog.capture` with `import { captureFailedRequest } from '@adaptivesoftwarellc/observability-client-js/axios'`. The SDK's axios entry point already provides this. |
+| `sch-ui/src/services/apiClient.ts` | ~25 lines: Axios response interceptor emits `api_request_failed` with `status_code`, `endpoint_group`, `method`, `correlation_id`, `is_network_error`. | Delete the inline interceptor and replace with one line: `import { attachAxiosInterceptor } from '@adaptivesoftwarellc/observability-client-js/axios'; attachAxiosInterceptor(apiClient);`. The SDK's `/axios` entry point exports `attachAxiosInterceptor` (and `wrapFetch`); the underlying `captureFailedRequest` lives at the package root and is invoked internally by the interceptor. |
 | `sch-ui/src/store/authStore.ts` | ~7 lines: on login, calls `identifyUser(userId, { roles, has_provider_link })` + fires `auth_login_success`; on logout, fires `auth_logout` + `posthog.reset()`. | Port verbatim — `roles` audit (Issue 6.1 prereq) must confirm role strings are generic. `posthog.reset()` becomes `analytics.reset()`. |
 | `sch-ui/src/components/common/ErrorBoundary.tsx` | ~8 lines: `componentDidCatch` fires `frontend_exception` with `source: 'ErrorBoundary'`, `error_type`, `component_stack_depth`. | Port verbatim. |
 
@@ -26,7 +26,7 @@ Inventory of the PostHog scaffolding on `SCH_UI@feature/posthog-implementation` 
 | Variable | Notes |
 |---|---|
 | `VITE_POSTHOG_KEY` | **Drop.** Replace with `VITE_OBSERVABILITY_KEY`. |
-| `VITE_POSTHOG_HOST` | **Drop.** Replace with `VITE_OBSERVABILITY_HOST`. |
+| `VITE_POSTHOG_HOST` | **Drop.** Replace with `VITE_OBSERVABILITY_URL`. |
 
 `.env.example` does not currently list either set — the PostHog branch documented them only in `documentation/POSTHOG_PLAN.md`. Issue 6.1 prereq: add `VITE_OBSERVABILITY_*` to `sch-ui/.env.example`.
 

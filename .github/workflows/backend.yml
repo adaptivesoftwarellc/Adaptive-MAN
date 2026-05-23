@@ -42,7 +42,7 @@ jobs:
 
   deploy-dev:
     needs: build-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # required for OIDC federation with Azure
@@ -113,7 +113,7 @@ jobs:
     # only trusts tokens carrying `environment:prod` in their subject, so even a
     # malicious workflow change can't reach Prod without the environment approval.
     needs: deploy-dev
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: prod
     permissions:

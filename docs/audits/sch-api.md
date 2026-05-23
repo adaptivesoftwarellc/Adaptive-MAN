@@ -20,7 +20,7 @@ Inventory of the PostHog scaffolding on `SCH_API@feature/posthog-implementation`
 |---|---|---|
 | `src/SCH.API/Program.cs` | DI registration (`PostHog:Enabled` + non-empty API key gate); three dev-only test endpoints (`/api/dev/posthog-{test,500-test,job-fail-test}`). | Replace DI line with `services.AddAdaptiveObservability(builder.Configuration.GetSection("AdaptiveObservability"))`. Rename test endpoints to `/api/dev/observability-{test,500-test,job-fail-test}` and confirm `app.Environment.IsDevelopment()` gate (Issue 6.1). |
 | `src/SCH.API/Middleware/GlobalExceptionMiddleware.cs` | Injects `IAnalyticsService`; emits `server_error_occurred` with HTTP method, status, correlation ID, auth type on 500s. | Port verbatim — `using Adaptive.ObservabilityClient` instead of `SCH.Core.Interfaces`. |
-| `src/SCH.API/appsettings.json` | New `PostHog` section: `ApiKey`, `HostUrl`, `Enabled`, `Environment`, `ReleaseSha`. | Replace section name `PostHog` → `AdaptiveObservability`; key `ApiKey` → `ServerApiKey`; key `HostUrl` → `IngestionBaseUrl`. Real values move to SCH's Key Vault for non-Dev. |
+| `src/SCH.API/appsettings.json` | New `PostHog` section: `ApiKey`, `HostUrl`, `Enabled`, `Environment`, `ReleaseSha`. | Rename section `PostHog` → `AdaptiveObservability`; keep key names `ApiKey` / `HostUrl` / `Enabled` / `Environment` / `ReleaseSha` verbatim — they match [`AdaptiveObservabilityOptions`](../../packages/observability-client-dotnet/src/Adaptive.ObservabilityClient/AdaptiveObservabilityOptions.cs) directly so the SDK binds via `services.Configure<AdaptiveObservabilityOptions>(config.GetSection("AdaptiveObservability"))`. Real values move to SCH's Key Vault for non-Dev. |
 | `src/SCH.Infrastructure/SCH.Infrastructure.csproj` | Adds `PostHog.AspNetCore` v2.5.0. | Remove `PostHog.AspNetCore`; add `<PackageReference Include="Adaptive.ObservabilityClient" Version="0.1.*" />`. |
 | **8x background services** (see Section F) | Each injects `IAnalyticsService` and emits `background_job_failed` with `job_name` + `error_type` from catch blocks. | Port verbatim per service. ~10-line delta per file. |
 
@@ -28,11 +28,13 @@ Inventory of the PostHog scaffolding on `SCH_API@feature/posthog-implementation`
 
 | Drop | Add | Source |
 |---|---|---|
-| `PostHog:ApiKey` | `AdaptiveObservability:ServerApiKey` | Key Vault (`SchObservabilityServerKey`) for non-Dev; `appsettings.Development.json` for Dev |
+| `PostHog:ApiKey` | `AdaptiveObservability:ApiKey` | Key Vault (`SchObservabilityApiKey`) for non-Dev; `appsettings.Development.json` for Dev |
 | `PostHog:Enabled` | `AdaptiveObservability:Enabled` | Static per env |
-| `PostHog:HostUrl` | `AdaptiveObservability:IngestionBaseUrl` | `https://obs-api-dev.azurewebsites.net` for Dev; `https://obs-api-prod.azurewebsites.net` for Prod |
+| `PostHog:HostUrl` | `AdaptiveObservability:HostUrl` | `https://obs-api-dev.azurewebsites.net` for Dev; `https://obs-api-prod.azurewebsites.net` for Prod |
 | `PostHog:Environment` | `AdaptiveObservability:Environment` | `Development` / `Production` |
 | `PostHog:ReleaseSha` | `AdaptiveObservability:ReleaseSha` | Build-time CI inject (Issue 6.1 prereq) |
+
+Key names match [`AdaptiveObservabilityOptions`](../../packages/observability-client-dotnet/src/Adaptive.ObservabilityClient/AdaptiveObservabilityOptions.cs) verbatim — section rename is the only delta vs. the unmerged PostHog scaffolding.
 
 ## D. NuGet dependencies
 
