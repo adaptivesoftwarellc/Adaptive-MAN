@@ -20,7 +20,7 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 |---|---|
 | 0 — Foundation & Repo Setup | **Done.** Removed from this doc; see `git log`. |
 | 1 — Backend Ingestion MVP | **Done.** Removed from this doc; see `git log`. |
-| 2 — Azure Key Vault & Deployment | **Partial.** KV config provider, fail-fast validation, setup docs, and end-to-end `az` CLI runbook shipped (2.2 + 2.5 + runbook). **Dev hosting + MI live**: `obs-api-dev` App Service + `id-observability-dev` user-assigned MI provisioned with OIDC federated credentials; CI deploys on push to main (closes 2.3 for Dev). EF migrations cutover landed (`EnsureCreatedAsync` → `MigrateAsync` with `Initial` migration covering Phase 1+4+5 schema). Outstanding: 2.1 UAT/Prod vaults; 2.3 UAT/Prod App Service instances; 2.4 Dev DB smoke + UAT/Prod DB cutover. |
+| 2 — Azure Key Vault & Deployment | **Dev + Prod live.** KV config provider, fail-fast validation, setup docs, and end-to-end `az` CLI runbook shipped (2.2 + 2.5 + runbook). **Dev**: `obs-api-dev` + `id-observability-dev` + `ObservabilityDev` DB live; CI deploys on push to main; 4.11 live-ingest harness PASSED end-to-end. **Prod (2026-05-22)**: `kv-adaptiveobs-prod` (purge protection on) + `id-observability-prod` MI + `obs-api-prod` App Service on shared plan + `ObservabilityProd` DB (GP_S_Gen5_1 serverless) + 31 firewall rules + real `ObservabilityAdminKey`/`ApiKeyHashPepper` minted + `db_datareader/writer/ddladmin` grants applied (via SqlClient + AAD token after Option B group swap). SQL AAD admin now points at `sg-adaptivetoolssql-aad-admins` containing both Brandon + Arlo — future onboardings are self-serve. `deploy-prod` job added to `backend.yml`, gated on `environment: prod` (required-reviewers configured in repo settings). First Prod deploy happens via that workflow on next push-to-main after PR merges. **Outstanding: 2.1 UAT vault; 2.3 UAT App Service; 2.4 UAT DB cutover.** |
 | 3 — React Dashboard MVP | **Done.** Removed from this doc; see `git log`. |
 | 4 — Client SDKs | **Done for MVP.** Both SDKs scaffolded; JS SDK auto-brackets sessions (4.11) and SCH route-normalization audit landed (4.2 closed with a parity test set). Issues 4.7 closed (won't-do) and 4.8 handed to 8.2 (Brandon confirmed 2026-04-30). |
 | 5 — Session Timeline | **Hardened.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`. SDK auto-bracket gap closed via Issue 4.11. **5.7 landed (2026-05-22):** full 8-cell benchmark grid run before/after on local Docker MSSQL; `Phase5HardeningIndexes` additive migration ships `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` + `Errors(ApplicationId, EnvironmentId, LastCorrelationId)`. p95 stays under 200ms through the 10k-events/session architecture-doc upper bound; 100k cell confirms the documented materialization boundary (see [`docs/perf.md`](docs/perf.md)). **4.11 live-ingest harness PASSED end-to-end against `obs-api-dev` (2026-05-22)** using a public key minted via the Phase 8.9 admin endpoints. Outstanding: 5.5 cross-process correlation verification owned by Phase 6.1; re-run grid against Azure SQL Dev after 2.4 UAT/Prod lands. |
@@ -192,7 +192,10 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - Dev portion of 2.1 — `AdaptiveToolsKeyVault` (centralus, RBAC) holds four placeholder secrets tagged `purpose=adaptive-observability`. UAT/Prod vaults are not yet provisioned.
 - End-to-end `az` CLI runbook ([`docs/azure-provisioning-runbook.md`](docs/azure-provisioning-runbook.md)) covering Dev KV, user-assigned MI, App Service Linux on a shared plan, ObservabilityDev DB with public-network + firewall, MI SQL grant, and the real connection string in KV.
 - **Issue 2.3 closed for Dev** — `obs-api-dev` App Service running on shared plan in `AdaptiveTools` RG; user-assigned MI `id-observability-dev` attached with `Key Vault Secrets User` on the Dev vault. CI workflow in `.github/workflows/backend.yml` deploys via OIDC federated credentials on push to main (no GitHub secrets stored), stamps `RELEASE_SHA`, and smokes `/health` post-deploy.
-- **Issue 2.4 partial** — EF migrations cutover landed: `EnsureCreatedAsync` replaced with `MigrateAsync` (relational-only guard preserves InMemory tests), `Initial` migration generated covering the Phase 1+4+5 schema, and a design-time DbContext factory committed for tooling. Dev DB provisioning + ingestion smoke still owed.
+- **Issue 2.4 done for Dev + Prod** — EF migrations cutover landed; `ObservabilityDev` + `ObservabilityProd` databases created on `adaptivetoolssql` (both `GP_S_Gen5_1` serverless, 60-min auto-pause); both MIs granted `db_datareader/writer/ddladmin`; real passwordless connection strings in their respective vaults. **Phase 2.4 UAT is the only remaining piece.**
+- **Issue 2.1 done for Prod** — `kv-adaptiveobs-prod` provisioned (centralus, RBAC-only, soft-delete on, **purge protection on**); 5 secrets seeded (real `ObservabilityDbConnection`, `ObservabilityAdminKey`, `ApiKeyHashPepper`; placeholder `JwtSigningKey` + `EncryptionKey` — unused code paths). MI granted `Key Vault Secrets User`, scoped to the vault.
+- **Issue 2.3 done for Prod** — `obs-api-prod` App Service on shared plan `ASP-AdaptiveTools-a211`; `id-observability-prod` user-assigned MI attached; federated credential gated on the GitHub `environment: prod` subject (required-reviewers configured in repo settings); `backend.yml` extended with a `deploy-prod` job that needs `deploy-dev` green.
+- **Option B (SQL AAD admin → group)** — `sg-adaptivetoolssql-aad-admins` security group created containing Brandon + Arlo; `adaptivetoolssql` AAD admin swapped from `brandon@adaptivesoftwarellc.com` to the group. **Removes the single-user handoff for all future onboardings** — either of them can run `CREATE USER … FROM EXTERNAL PROVIDER` going forward.
 
 ### Issue 2.1 — Provision UAT and Prod vaults
 
@@ -203,9 +206,11 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - **Dev vault:** Brandon will provision a fresh dedicated Key Vault for adaptive-observability rather than continuing to share `AdaptiveToolsKeyVault`. He owns the provisioning.
 
 **Acceptance criteria:**
-- [ ] `kv-observability-uat`, `kv-observability-prod` provisioned in their App Service's region
-- [ ] Soft-delete on both; purge protection on prod
-- [ ] RBAC-only (no access policies); App Service MI granted `Key Vault Secrets User`, scoped to that vault only
+- [ ] `kv-observability-uat` provisioned in its App Service's region
+- [x] `kv-adaptiveobs-prod` provisioned (centralus) *(2026-05-22; name uses `-adaptiveobs-` because `kv-observability-prod` is globally taken)*
+- [x] Soft-delete on both Dev and Prod; **purge protection on Prod**
+- [x] RBAC-only (no access policies); Prod MI granted `Key Vault Secrets User`, scoped to the Prod vault only
+- [ ] UAT vault: same checklist when UAT lands
 
 ### Issue 2.3 — Hosting environment + managed identity for the Observability API
 
@@ -232,10 +237,17 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - [x] `KeyVault__Uri` app setting points at the Dev vault
 - [x] `/health` returns 200 from the deployed API; KV-backed config resolves on startup (verified by CI smoke after `5bd404c`)
 
-**Acceptance criteria (UAT/Prod — open):**
-- [ ] Provision UAT and Prod App Service instances on the shared plan
-- [ ] User-assigned MIs (or environment-scoped federated credentials) wired with `Key Vault Secrets User` on the respective vaults
-- [ ] CI deploy job extended to UAT/Prod with appropriate gating
+**Acceptance criteria (Prod — closed 2026-05-22):**
+- [x] `obs-api-prod` App Service provisioned on the shared plan
+- [x] User-assigned MI `id-observability-prod` attached; federated credential subject `repo:adaptivesoftwarellc/Adaptive-MAN:environment:prod` (stronger than ref-based — requires the GitHub Environment context)
+- [x] MI granted `Key Vault Secrets User` on `kv-adaptiveobs-prod`, scoped to that vault only
+- [x] `KeyVault__Uri` + `ASPNETCORE_ENVIRONMENT=Production` app settings configured
+- [x] `backend.yml` extended with `deploy-prod` job: `needs: deploy-dev`, `environment: prod` (required-reviewers configured separately in repo settings)
+
+**Acceptance criteria (UAT — open):**
+- [ ] Provision UAT App Service instance on the shared plan
+- [ ] User-assigned MI + federated credential for UAT
+- [ ] Workflow extended with `deploy-uat` job between `deploy-dev` and `deploy-prod`
 
 ### Issue 2.4 — Move database secret to Key Vault
 
@@ -252,13 +264,20 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 
 **Path B:** Stand up a dedicated `sql-observability-{env}` server. Cleaner isolation, more cost, more setup. Probably right for Prod; overkill for Dev.
 
-**Acceptance criteria:**
-- [ ] `ObservabilityDev` database created (Path A) or new SQL server + db (Path B)
-- [ ] App Service can reach SQL (VNet integration + private endpoint, or alternative)
-- [ ] App Service MI granted DB access via `CREATE USER [<app-name>] FROM EXTERNAL PROVIDER` + `db_datareader` / `db_datawriter` / `db_ddladmin`
-- [ ] `ObservabilityDbConnection` secret in KV holds the real passwordless connection string
-- [ ] `appsettings.*.json` in deployed envs contain no connection string
-- [ ] Deployed API connects; ingestion smoke test writes a row
+**Acceptance criteria (Dev + Prod — closed):**
+- [x] `ObservabilityDev` + `ObservabilityProd` databases created on `adaptivetoolssql` (both GP_S_Gen5_1 serverless, 60-min auto-pause)
+- [x] Both App Services can reach SQL (public-network re-enabled + per-app firewall rules covering 31 outbound IPs each)
+- [x] Both MIs granted `CREATE USER FROM EXTERNAL PROVIDER` + `db_datareader/writer/ddladmin`. Prod grants applied 2026-05-22 via SqlClient + AAD token through the new admin group (Option B) — no Brandon handoff required.
+- [x] `ObservabilityDbConnection` in `AdaptiveToolsKeyVault` (Dev) + `kv-adaptiveobs-prod` (Prod) hold real passwordless connection strings
+- [x] `appsettings.*.json` in deployed envs contain no connection string
+- [x] Dev API connects and writes rows (4.11 harness PASSED, 2026-05-22)
+- [ ] Prod API connects and writes a row (first deploy via the `deploy-prod` workflow job — pending PR merge + `prod` environment approval)
+
+**Acceptance criteria (UAT — open):**
+- [ ] `ObservabilityUat` DB on `adaptivetoolssql` (same SKU)
+- [ ] MI grant via the existing group-based admin
+- [ ] Real connection string in `kv-observability-uat`
+- [ ] First UAT deploy via workflow
 
 **Decisions made (Brandon, 2026-04-30 / 2026-05-02):**
 - **Server topology:** Path A — reuse `adaptivetoolssql`; new `ObservabilityDev` database for Dev (and per-env DBs for UAT/Prod when those land).
@@ -266,8 +285,9 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - **Human dependency:** Brandon will run the `CREATE USER … FROM EXTERNAL PROVIDER` T-SQL when the App Service MI is ready.
 - **Migration strategy:** Generate `dotnet ef migrations add Initial`, switch `EnsureCreatedAsync` → `MigrateAsync` as part of this issue (before the first non-Dev deploy). **Shipped in commit `75ef382` — `Initial` migration covers Phase 1+4+5 schema; `MigrateAsync` guards InMemory tests via the relational provider check; design-time factory committed for tooling.**
 
-**Decisions still needed:**
-- **Database SKU for `ObservabilityDev`:** match `MaintenanceDB` shape (`GP_S_Gen5_1` serverless, ~$5–15/mo idle) or fixed-capacity? Default to serverless unless told otherwise.
+**Decisions resolved 2026-05-22:**
+- **Database SKU:** `GP_S_Gen5_1` serverless (matches `MaintenanceDB`). Same SKU applied to `ObservabilityProd`. ~$5–15/mo per DB idle.
+- **SQL AAD admin model (Option B):** swapped from single-user (`brandon@…`) to the `sg-adaptivetoolssql-aad-admins` security group. Brandon's access preserved via group membership; Arlo added so future onboardings (UAT, SCH, WMS, …) don't require a handoff for the T-SQL grant step.
 
 ---
 
