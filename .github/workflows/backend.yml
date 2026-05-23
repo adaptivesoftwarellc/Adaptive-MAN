@@ -12,13 +12,12 @@ on:
       - ".github/workflows/backend.yml"
 
 # Public identifiers (not secrets) — discoverable from any deployed resource.
-# Auth security comes from the user-assigned MI's federated credentials, which
-# only trust tokens issued for this repo's main branch / pull_request runs.
+# Per-env client ids live on the per-job `env:` block. Auth security comes from
+# each user-assigned MI's federated credentials, which only trust tokens issued
+# for this repo's main branch (Dev) or the `prod` GitHub Environment (Prod).
 env:
-  AZURE_CLIENT_ID:       b44e6af5-9dd0-49c4-bd8d-5957a2e166dd
   AZURE_TENANT_ID:       36e913b6-b1df-4592-a4f8-6f8ea39f7e20
   AZURE_SUBSCRIPTION_ID: a21b1a73-9dce-458b-933c-b735703be5c4
-  AZURE_WEBAPP_NAME:     obs-api-dev
 
 jobs:
   build-test:
@@ -47,6 +46,9 @@ jobs:
     permissions:
       id-token: write   # required for OIDC federation with Azure
       contents: read
+    env:
+      AZURE_CLIENT_ID:   b44e6af5-9dd0-49c4-bd8d-5957a2e166dd
+      AZURE_WEBAPP_NAME: obs-api-dev
     defaults:
       run:
         working-directory: backend
@@ -84,6 +86,75 @@ jobs:
         # azure/webapps-deploy@v3 resolves `package:` paths relative to GITHUB_WORKSPACE,
         # not the step's working-directory. The zip lands at workspace root (the `cd
         # ../publish` from backend/ lands there), so use the absolute workspace path.
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: ${{ github.workspace }}/publish.zip
+      - name: Smoke /health
+        run: |
+          sleep 45
+          for i in 1 2 3 4; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health")
+            if [ "$code" = "200" ]; then
+              echo "OK: /health = $code"
+              curl -s "https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+              exit 0
+            fi
+            echo "Attempt $i: /health = $code, retry in 20s..."
+            sleep 20
+          done
+          echo "FAIL: /health did not return 200"
+          exit 1
+
+  deploy-prod:
+    # Gate Prod behind a successful Dev deploy + the `prod` GitHub Environment.
+    # Configure required reviewers on the environment in GitHub repo settings to
+    # require a human click before this job starts. The MI's federated credential
+    # only trusts tokens carrying `environment:prod` in their subject, so even a
+    # malicious workflow change can't reach Prod without the environment approval.
+    needs: deploy-dev
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AZURE_CLIENT_ID:   ec77f2a2-11d2-4e61-9927-6313c8297c40
+      AZURE_WEBAPP_NAME: obs-api-prod
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Publish (linux-x64)
+        run: |
+          dotnet publish src/Observability.Api/Observability.Api.csproj \
+            -c Release \
+            -r linux-x64 \
+            --self-contained false \
+            -p:VersionSuffix=${GITHUB_SHA::8} \
+            -o ../publish
+      - name: Zip publish output
+        run: |
+          cd ../publish
+          zip -r ../publish.zip .
+      - name: Login to Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Set RELEASE_SHA app setting
+        run: |
+          az webapp config appsettings set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group AdaptiveTools \
+            --settings RELEASE_SHA=${GITHUB_SHA}
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           package: ${{ github.workspace }}/publish.zip
