@@ -1,0 +1,143 @@
+name: sdk-publish
+
+# Publishes Adaptive Observability SDKs.
+#
+# Triggers:
+#   * Tag push matching `client-js-v*`     → publishes @adaptivesoftwarellc/observability-client-js to npm
+#   * Tag push matching `client-dotnet-v*` → publishes Adaptive.ObservabilityClient to NuGet
+#   * Manual dispatch (choose which package + dry-run flag)
+#
+# Required repository secrets:
+#   NPM_TOKEN       — npmjs.org automation token with publish rights on the `@adaptivesoftwarellc` scope
+#   NUGET_API_KEY   — nuget.org API key scoped to `Adaptive.ObservabilityClient`
+#
+# Versioning convention:
+#   Bump the version in `packages/observability-client-js/package.json` (JS) or
+#   `packages/observability-client-dotnet/src/Adaptive.ObservabilityClient/Adaptive.ObservabilityClient.csproj` (.NET),
+#   then push a tag whose suffix matches that version (e.g. `client-js-v0.1.1`, `client-dotnet-v0.2.0`).
+#   The publish step fails-fast if the tag version does not match the package version.
+
+on:
+  push:
+    tags:
+      - "client-js-v*"
+      - "client-dotnet-v*"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Which package to publish"
+        required: true
+        type: choice
+        options:
+          - client-js
+          - client-dotnet
+      dry_run:
+        description: "Pack only; do not push to registry"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  publish-js:
+    if: |
+      startsWith(github.ref, 'refs/tags/client-js-v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.package == 'client-js')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/observability-client-js
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+          scope: "@adaptivesoftwarellc"
+          cache: "npm"
+          cache-dependency-path: packages/observability-client-js/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test --if-present
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/client-js-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#client-js-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Publishing @adaptivesoftwarellc/observability-client-js@$PKG_VERSION"
+
+      - name: npm publish (dry-run)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: npm publish --dry-run --access public
+
+      - name: npm publish
+        if: |
+          startsWith(github.ref, 'refs/tags/client-js-v') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+  publish-dotnet:
+    if: |
+      startsWith(github.ref, 'refs/tags/client-dotnet-v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.package == 'client-dotnet')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/observability-client-dotnet
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - run: dotnet restore
+      - run: dotnet build --configuration Release --no-restore
+      - run: dotnet test --configuration Release --no-build
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/client-dotnet-v')
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#client-dotnet-v}"
+          PKG_VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" src/Adaptive.ObservabilityClient/Adaptive.ObservabilityClient.csproj)
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match csproj <Version> ($PKG_VERSION)"
+            exit 1
+          fi
+          echo "Publishing Adaptive.ObservabilityClient $PKG_VERSION"
+
+      - name: dotnet pack
+        run: |
+          dotnet pack src/Adaptive.ObservabilityClient/Adaptive.ObservabilityClient.csproj \
+            --configuration Release --no-build \
+            --output ./artifacts
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: packages/observability-client-dotnet/artifacts/*.nupkg
+
+      - name: NuGet push (skipped — dry run)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true'
+        run: echo "Dry run — nupkg uploaded as artifact; not pushed to nuget.org"
+
+      - name: NuGet push
+        if: |
+          startsWith(github.ref, 'refs/tags/client-dotnet-v') ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+        run: |
+          dotnet nuget push artifacts/*.nupkg \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate

@@ -12,7 +12,7 @@ The new SDKs preserve the PostHog Phase 1 contract verbatim. Migration is **impo
   // src/main.tsx
 - import posthog from "posthog-js";
 - posthog.init(import.meta.env.VITE_POSTHOG_KEY, { api_host: import.meta.env.VITE_POSTHOG_HOST, autocapture: false, capture_pageview: false });
-+ import * as observability from "@adaptive/observability-client-js";
++ import * as observability from "@adaptivesoftwarellc/observability-client-js";
 + observability.init({ ingestUrl: import.meta.env.VITE_OBSERVABILITY_URL, apiKey: import.meta.env.VITE_OBSERVABILITY_KEY });
 ```
 
@@ -29,14 +29,14 @@ The new SDKs preserve the PostHog Phase 1 contract verbatim. Migration is **impo
 ```diff
   // src/services/apiClient.ts
 - // bespoke axios interceptor that calls posthog.capture("api_request_failed", ...)
-+ import { attachAxiosInterceptor } from "@adaptive/observability-client-js/axios";
++ import { attachAxiosInterceptor } from "@adaptivesoftwarellc/observability-client-js/axios";
 + attachAxiosInterceptor(api);
 ```
 
 ```diff
   // src/components/common/ErrorBoundary.tsx
 - // bespoke ErrorBoundary that calls posthog.capture("frontend_exception", ...)
-+ import { ObservabilityErrorBoundary } from "@adaptive/observability-client-js/react";
++ import { ObservabilityErrorBoundary } from "@adaptivesoftwarellc/observability-client-js/react";
 + // wrap usage points with <ObservabilityErrorBoundary fallback={...}>
 ```
 
