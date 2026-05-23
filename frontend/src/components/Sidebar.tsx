@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { presets, presetHref } from '../lib/presets';
 
 const links = [
   { to: '/health', label: 'Health' },
@@ -27,6 +28,23 @@ export function Sidebar() {
             }
           >
             {l.label}
+          </NavLink>
+        ))}
+
+        <div className="mt-4 px-3 text-[10px] uppercase tracking-wider text-slate-500">
+          Presets
+        </div>
+        {presets.map((p) => (
+          <NavLink
+            key={p.id}
+            to={presetHref(p)}
+            className={({ isActive }) =>
+              `rounded px-3 py-1.5 text-xs transition ${
+                isActive ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800'
+              }`
+            }
+          >
+            {p.label}
           </NavLink>
         ))}
       </nav>
