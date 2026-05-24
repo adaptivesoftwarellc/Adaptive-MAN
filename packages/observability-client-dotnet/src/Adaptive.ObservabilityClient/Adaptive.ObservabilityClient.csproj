@@ -1,7 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Adaptive.ObservabilityClient</PackageId>
-    <Version>0.1.1</Version>
+    <!--
+      Package id on nuget.org. The `Adaptive.*` prefix is reserved by another
+      nuget account, so pushes under that id 409. The namespace below stays
+      `Adaptive.ObservabilityClient` — only the registry id changed, so
+      consuming code keeps `using Adaptive.ObservabilityClient;` unchanged.
+    -->
+    <PackageId>AdaptiveSoftwareLLC.ObservabilityClient</PackageId>
+    <Version>0.1.2</Version>
     <Authors>Adaptive Software</Authors>
     <Description>Adaptive Observability .NET SDK. Implements IAnalyticsService so SCH-style migrations are a DI swap.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
