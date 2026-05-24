@@ -56,7 +56,7 @@ Env vars to swap:
 ```diff
   // .csproj
 - <PackageReference Include="PostHog.AspNetCore" Version="2.5.0-pre" />
-+ <PackageReference Include="Adaptive.ObservabilityClient" Version="0.1.0" />
++ <PackageReference Include="AdaptiveSoftwareLLC.ObservabilityClient" Version="0.1.2" />
 ```
 
 `appsettings.json`: rename the `PostHog` section to `AdaptiveObservability`. Field names match (`Enabled`, `HostUrl`, `ApiKey`, `Environment`, `ReleaseSha`).

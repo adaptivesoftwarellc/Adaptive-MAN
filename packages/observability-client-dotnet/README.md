@@ -1,11 +1,14 @@
-# Adaptive.ObservabilityClient (.NET)
+# AdaptiveSoftwareLLC.ObservabilityClient (.NET)
+
+> NuGet package id is `AdaptiveSoftwareLLC.ObservabilityClient`; the .NET namespace remains `Adaptive.ObservabilityClient`. The `Adaptive.*` prefix on nuget.org is reserved by another account.
+
 
 ASP.NET Core SDK for the Adaptive Observability platform. Ships an `IAnalyticsService` implementation whose contract is identical to SCH's existing `SCH.Core.Interfaces.IAnalyticsService`, so cutover is a DI registration swap — no call sites change.
 
 ## Install
 
 ```bash
-dotnet add package Adaptive.ObservabilityClient
+dotnet add package AdaptiveSoftwareLLC.ObservabilityClient
 ```
 
 ## Quickstart (under 50 LOC)
