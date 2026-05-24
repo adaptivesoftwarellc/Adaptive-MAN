@@ -298,7 +298,7 @@ Each phase has a **Goal**, **Exit criteria**, and **Issues** ready to file in Gi
 - 4.3 — Axios interceptor + native `fetch` wrapper. Opt-in.
 - 4.4 — React error boundary that captures `error_type` / `source` / `component_stack_depth` only.
 - 4.5 — Batched transport with size/interval flush, exponential backoff + jitter, all errors swallowed. Dev-only warnings gated by an `init({ debug })` flag.
-- 4.6 — `AdaptiveObservabilityService : IAnalyticsService`, `AddAdaptiveObservability(...)` DI extension, background `Channel<T>`, never throws into host. **Decision:** the SDK ships its own `IAnalyticsService` interface (under `Adaptive.ObservabilityClient`); SCH adopters delete `SCH.Core.Interfaces.IAnalyticsService` and update `using` statements.
+- 4.6 — `AdaptiveObservabilityService : IAnalyticsService`, `AddAdaptiveObservability(...)` DI extension, background `Channel<T>`, never throws into host. **Decision:** the SDK ships its own `IAnalyticsService` interface in the `Adaptive.ObservabilityClient` .NET namespace (NuGet id `AdaptiveSoftwareLLC.ObservabilityClient`); SCH adopters delete `SCH.Core.Interfaces.IAnalyticsService` and update `using` statements.
 - 4.7 — Backend `RouteNormalizer.Normalize(path)` + `EndpointGroup(...)` + `NormalizeFromContext(HttpContext)`. **Caveat below: the `RouteData`/endpoint-template path was dropped in favor of `Request.Path` because endpoint-metadata reflection is fragile across MVC and Minimal APIs.**
 - 4.8 — `BackgroundJobFailures` sidecar table with `LastSuppressedAt` + window-aware upsert; integration test confirms 100 identical failures collapse to one incident with `count=100`. **Caveat below: window is currently a static 15-minute default; per-app override is deferred to Phase 8.2 hardening.**
 - 4.9 — Replay slot: `InitOptions.replay` shape, `IReplayAdapter` interface, default no-op adapter, no rrweb dependency. Unit test confirms `replay.enabled: true` with the no-op adapter is a no-op, not a throw.
@@ -407,7 +407,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 **Exit criteria:** SCH_UI + SCH_API emit the Phase 1 event set to adaptive-observability Dev for 5 business days with zero `SafetyViolations`; privacy reviewer sign-off committed; Prod stable for 1 week.
 
-**Strategy:** Cherry-pick the analytics scaffolding from `feature/posthog-implementation` into a new `feature/adaptive-observability` branch on each SCH repo, replacing PostHog SDK calls with `observability-client-{js,dotnet}` calls. The SCH `IAnalyticsService` interface is replaced by the SDK's own (under `Adaptive.ObservabilityClient`); SCH adopts that one rather than its local copy.
+**Strategy:** Cherry-pick the analytics scaffolding from `feature/posthog-implementation` into a new `feature/adaptive-observability` branch on each SCH repo, replacing PostHog SDK calls with `observability-client-{js,dotnet}` calls. The SCH `IAnalyticsService` interface is replaced by the SDK's own (in the `Adaptive.ObservabilityClient` namespace, shipped via NuGet id `AdaptiveSoftwareLLC.ObservabilityClient`); SCH adopts that one rather than its local copy.
 
 ### Issue 6.1 — Hardening prereqs (in this repo and SCH)
 **Description:** Items previously folded into "deferred PostHog hardening" still apply to a fresh adaptive-observability integration. Resolve before SCH UAT.
@@ -446,10 +446,10 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 **Acceptance criteria:**
 - [x] `docs/audits/sch-api.md` lists every file added/modified (5 deleted, 4 modified, 8 BG services modified)
 - [x] Lists every config key added (`AdaptiveObservability:ApiKey/Enabled/HostUrl/Environment/ReleaseSha` — names match the SDK's `AdaptiveObservabilityOptions` so binding is `services.Configure<AdaptiveObservabilityOptions>(config.GetSection("AdaptiveObservability"))` with no remapping)
-- [x] Confirms no `PostHog.AspNetCore` reference enters `SCH.Infrastructure.csproj` (replaced by `Adaptive.ObservabilityClient`)
+- [x] Confirms no `PostHog.AspNetCore` reference enters `SCH.Infrastructure.csproj` (replaced by the `AdaptiveSoftwareLLC.ObservabilityClient` NuGet package, namespace `Adaptive.ObservabilityClient`)
 
 ### Issue 6.5 — Implement adaptive-observability in SCH_API
-**Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and wire to the SDK's `AddAdaptiveObservability(...)`. SCH adopts the SDK's own `IAnalyticsService` (under `Adaptive.ObservabilityClient`) rather than its local copy from the unmerged PostHog branch.
+**Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and wire to the SDK's `AddAdaptiveObservability(...)`. SCH adopts the SDK's own `IAnalyticsService` (namespace `Adaptive.ObservabilityClient`, shipped via NuGet id `AdaptiveSoftwareLLC.ObservabilityClient`) rather than its local copy from the unmerged PostHog branch.
 **Acceptance criteria:**
 - [ ] `feature/adaptive-observability` branched from current `dev` on SCH_API
 - [ ] DI registration via `AddAdaptiveObservability(...)`

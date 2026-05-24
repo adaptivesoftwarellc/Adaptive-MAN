@@ -4,12 +4,12 @@ name: sdk-publish
 #
 # Triggers:
 #   * Tag push matching `client-js-v*`     → publishes @adaptivesoftwarellc/observability-client-js to npm
-#   * Tag push matching `client-dotnet-v*` → publishes Adaptive.ObservabilityClient to NuGet
+#   * Tag push matching `client-dotnet-v*` → publishes AdaptiveSoftwareLLC.ObservabilityClient to NuGet
 #   * Manual dispatch (choose which package + dry-run flag)
 #
 # Required repository secrets:
 #   NPM_TOKEN       — npmjs.org automation token with publish rights on the `@adaptivesoftwarellc` scope
-#   NUGET_API_KEY   — nuget.org API key scoped to `Adaptive.ObservabilityClient`
+#   NUGET_API_KEY   — nuget.org API key scoped to `AdaptiveSoftwareLLC.ObservabilityClient`
 #
 # Versioning convention:
 #   Bump the version in `packages/observability-client-js/package.json` (JS) or
@@ -114,7 +114,7 @@ jobs:
             echo "::error::Tag version ($TAG_VERSION) does not match csproj <Version> ($PKG_VERSION)"
             exit 1
           fi
-          echo "Publishing Adaptive.ObservabilityClient $PKG_VERSION"
+          echo "Publishing AdaptiveSoftwareLLC.ObservabilityClient $PKG_VERSION"
 
       - name: dotnet pack
         run: |

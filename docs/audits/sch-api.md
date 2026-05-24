@@ -80,6 +80,6 @@ Estimated PR diff: ~13 files touched (excluding deleted PostHog files), ~200 lin
 
 ## I. Open items feeding Issue 6.5
 
-- **SDK install method:** Published as `AdaptiveSoftwareLLC.ObservabilityClient` on nuget.org (`Adaptive.*` prefix was reserved by another account, causing 409s on initial 0.1.0/0.1.1 attempts — see [chore/rename-dotnet-pkg-id PR](../../DEVELOPMENT_PLAN.md) for the diagnosis). The .NET namespace remains `Adaptive.ObservabilityClient` so SCH consumer code is unaffected by the registry-id change.
+- **SDK install method:** Published as `AdaptiveSoftwareLLC.ObservabilityClient` on nuget.org (`Adaptive.*` prefix was reserved by another account, causing 409s on initial 0.1.0/0.1.1 attempts — see [DEVELOPMENT_PLAN.md](../../DEVELOPMENT_PLAN.md) for the diagnosis). The .NET namespace remains `Adaptive.ObservabilityClient` so SCH consumer code is unaffected by the registry-id change.
 - **Correlation ID middleware:** SCH_API already has correlation-ID middleware (PostHog scaffolding consumes it); Issue 5.5 verification is a Dev-shakedown gate (Option A), not a 6.5 blocker.
 - **Local SCH Dev appsettings:** must point at `https://obs-api-dev.azurewebsites.net` with a public-client + server API key minted via the Phase 8.9 admin endpoints (Issue 6.6).
