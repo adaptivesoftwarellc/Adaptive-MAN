@@ -58,7 +58,8 @@ function Create-App([string]$slug, [string]$name, [string]$description) {
         -Uri "$ApiBase/api/admin/apps" `
         -Headers $headers `
         -Body $body
-    Write-Host ("  -> created={0} app_id={1} envs={2}" -f $resp.created, $resp.application_id, ($resp.environments -join ","))
+    $envNames = ($resp.environments | ForEach-Object { $_.name }) -join ","
+    Write-Host ("  -> created={0} app_id={1} envs={2}" -f $resp.created, $resp.id, $envNames)
     return $resp
 }
 
@@ -72,8 +73,8 @@ function Mint-Key([string]$slug, [string]$env, [string]$keyType) {
         -Headers $headers `
         -Body $body
     Write-Host "  PLAINTEXT KEY (shown once -- capture now):" -ForegroundColor Yellow
-    Write-Host ("    {0}" -f $resp.key) -ForegroundColor Yellow
-    Write-Host ("  prefix={0}  key_type={1}  env={2}" -f $resp.key_prefix, $resp.key_type, $env)
+    Write-Host ("    {0}" -f $resp.plaintext_key) -ForegroundColor Yellow
+    Write-Host ("  key_id={0}  key_type={1}  env={2}" -f $resp.id, $resp.key_type, $env)
     return $resp
 }
 
