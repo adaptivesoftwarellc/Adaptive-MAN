@@ -29,6 +29,7 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 | 6 — SCH Onboarding | **Sessions A + B done; Session C (wall-clock soak + cutover) in flight.** Re-scoped 2026-04-30 (PostHog never merged; SCH onboards as a fresh integration). Soak shape (Option A, 2026-05-22): 5-business-day SCH Dev → `obs-api-dev` shakedown (no platform UAT env). **A: audits + publish pipeline shipped (2026-05-22).** **B: SDK integration merged (2026-05-24)** — SCH_UI on `feature/adaptive-observability` (analytics wrapper, routeUtils, RouteTracker, axios interceptor, identify on login, ErrorBoundary, `.env.example`, both Azure SWA workflows pass `VITE_OBSERVABILITY_*` + `VITE_RELEASE_SHA`, role-names audit doc); SCH_API on `feature/adaptive-observability` (`AddAdaptiveObservability(...)` DI, `AdaptiveObservability` config section, `GlobalExceptionMiddleware` emits `server_error_occurred` on 5xx, 8 BG services emit `background_job_failed`, dev-only test endpoints, `AnalyticsIdentity` helper). 6.9 dashboard preset merged (PR #15). 6.6 partly done (2026-05-25): app + env rows created via `scripts/onboard-sch.ps1`, 4 plaintext keys minted, ingestion smoke 4/4 green (sch-api + sch-ui Dev keys, events + errors paths, all 202 against `obs-api-dev`). **Session C remaining (as of 2026-05-25):** (a) Brandon sets four `AdaptiveObservability__*` App Service config values on the SCH_API Dev App Service (`ASPNETCORE_ENVIRONMENT=Dev` — not the literal "Development", so the App Service config path is the right one); (b) first real SCH-emitted event lands in `obs-api-dev` → Day 1 of the soak; (c) 5 business days zero `SafetyViolations` for `sch-ui` + `sch-api`; (d) 5.5 cross-process correlation trace (one request showing matching `correlation_id` on FE `api_request_failed` + BE `server_error_occurred`); (e) privacy reviewer sign-off committed in [`docs/migration/sch-dev-shakedown.md`](docs/migration/sch-dev-shakedown.md); (f) 6.8 Prod cutover after soak passes — Prod App Service config values wired by Brandon to `SHC-KV` or App Service config, Prod deploy with SDK, 1 week stable. **Adaptive-side blocker:** SCH_API Dev + Prod App Services aren't in `Adaptive Subscription` — Brandon owns the runtime config wiring. |
 | 7 — WMS Onboarding | Open. Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. |
 | 8 – 9 | Open. Documented below. |
+| 10 — Platform Hardening (mission audit) | **Open. Added 2026-06-01.** 11 issues surfaced by re-reading the platform mission (custom PostHog replacement, multi-app, strict PHI/PII, anti-lock-in) against the rest of the plan. Four items (10.1 multi-tenant isolation test, 10.2 PHI allowlist canary, 10.3 self-monitoring/SLOs, 10.11 CODEOWNERS on privacy files) are flagged as **pre-6.8 cutover gates**. |
 
 ## Constraints
 
@@ -838,6 +839,189 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Investigation questions:**
 - Sample size N for masking audit? (Suggest: all recordings in week 1, stratified sample in week 2.)
 - Do we need a "kill switch" config flag separate from `ReplayEnabled` to instantly disable replay across all apps in case of incident?
+
+---
+
+## Phase 10 — Platform Hardening (mission audit)
+
+**Goal:** Close gaps surfaced by a 2026-06-01 audit of the plan against the platform's original mission: a *custom PostHog replacement* that ingests from *multiple internal apps* under *strict PHI/PII rules*, with *no data lock-in*. These are not new features — they are missing pieces the original Phase 1–9 plan didn't surface. Several are pre-cutover gates for SCH Prod (6.8).
+
+**Exit criteria:** Each issue either landed or explicitly deferred with a recorded rationale. The four pre-cutover gates land before Phase 6.8 executes.
+
+**Sequencing:**
+
+- **Pre-SCH-Prod-cutover gates (must land before 6.8):** 10.1, 10.2, 10.3, 10.11.
+- **Should land during 6.7 soak (parallel work):** 10.4, 10.5, 10.7.
+- **Can land post-cutover:** 10.6, 10.8, 10.9, 10.10.
+
+### Issue 10.1 — Multi-tenant isolation regression test
+
+**Description:** The platform's central security claim is "App A's data cannot bleed into App B's." Today this is enforced by `ApplicationId` resolving server-side from the API key — code-level only. No integration test exercises the boundary. With SCH onboarding adding the second tenant, a regression here is a privacy incident.
+
+**Acceptance criteria:**
+- [ ] New `MultiTenantIsolationTests` in `Observability.IntegrationTests` seeded with two distinct apps + envs
+- [ ] Test: App A's `aoserv_…` key POSTs an event with a spoofed `application_id` field in the payload — the persisted row uses App A's id, never the spoofed value
+- [ ] Test: App A's key against `/api/dashboard/events?app=<App-B-id>` returns either empty results or 403 — never App B's data
+- [ ] Test: same for `/api/dashboard/errors`, `/api/dashboard/sessions`, `/api/sessions/{id}/timeline`
+- [ ] Test runs in CI on every PR; failure blocks merge
+
+**Investigation questions:**
+- Today's dashboard endpoints accept `app` as a query parameter without verifying it matches the resolved api-key's `ApplicationId` (because dashboard is unauth on a trusted network). Does the test live until 8.6 RBAC lands, or do we add api-key auth to dashboard endpoints now? Lean: scope the test to the *ingestion* path immediately; dashboard isolation lands with 8.6.
+
+### Issue 10.2 — PHI allowlist regression canary
+
+**Description:** The `PropertyAllowlistValidator` + `SafetyViolations` write path is the most safety-critical surface in the platform. Today the allowlist is covered by unit + integration tests, but nothing **scheduled** verifies it in production. A regression — a forbidden field being silently allowed — would not be caught until PHI started landing in `Events`.
+
+**Acceptance criteria:**
+- [ ] `.github/workflows/canary.yml` runs daily (cron) against `obs-api-dev` and `obs-api-prod`
+- [ ] For each known-forbidden field (`email`, `username`, `display_name`, `dob`, `ssn`, `raw_url`, `exception_message`, `stack_trace`, `request_body`, `response_body`, …) the canary POSTs a synthetic event and asserts:
+  - 422 returned
+  - A `SafetyViolations` row exists for that field
+  - No `Events` row created
+- [ ] Loud failure path: GitHub issue auto-created + Teams webhook (use the same channel as 8.4 if/when it lands; until then, GitHub issue is sufficient)
+- [ ] Synthetic events use a dedicated `canary-test` app row so they're easy to filter out of dashboards
+- [ ] Canary cleans up its own `SafetyViolations` rows (or uses a retention rule that doesn't keep them long-term)
+
+**Investigation questions:**
+- Do we run against Prod with a canary key, or only against Dev? Lean: both, with a `canary-test` app row in each env. The Prod canary catches Prod-specific configuration drift (e.g., a pepper rotation that mismatched).
+
+### Issue 10.3 — Platform self-monitoring + SLOs
+
+**Description:** The plan has alert rules (8.3) for *app* errors. There's no plan for **who watches the platform itself**. If `obs-api-prod` goes down, SCH errors silently stop landing (SDK swallows transport failures by design) and nobody at either side knows. The platform also lacks defined SLOs, so "is it healthy" has no answer.
+
+**Acceptance criteria:**
+- [ ] `docs/slo.md` defines:
+  - Availability target: 99.5% on `/api/ingest/*` rolling 30-day
+  - Ingest latency target: p95 < 200ms (write path)
+  - Error budget burn-rate alert thresholds
+- [ ] External uptime check on `/health` for `obs-api-prod` (Azure Monitor / Better Uptime / UptimeRobot — pick at implementation, reuse whatever Adaptive already uses)
+- [ ] Dev environment uptime check optional; if added, alerts to email only (no paging)
+- [ ] Pager/Teams channel for Prod outage notification
+- [ ] `docs/runbooks/platform-outage.md` covers first-response steps when the uptime check fires
+
+**Investigation questions:**
+- Does Adaptive have an existing uptime tool? If so, reuse. If not, recommend Azure Monitor Availability Tests (cheapest path; already in Azure).
+- How is SLO breach communicated externally? Onboarded apps (SCH, WMS) don't currently know when the platform is degraded.
+
+### Issue 10.4 — API versioning strategy
+
+**Description:** SDKs hardcode `/api/ingest/events`. There is no `/v1/` prefix and no SDK-version header. When the wire protocol needs to change (a third required field, a property-shape change), every deployed SDK breaks simultaneously. Cheap to introduce versioning now; expensive to retrofit after multiple apps are in Prod.
+
+**Acceptance criteria:**
+- [ ] `/api/v1/ingest/events` + `/api/v1/ingest/errors` routes added, aliasing the existing paths (no behavioral change at first)
+- [ ] `/api/v1/ingest/sessions/start` + `/end` similarly aliased
+- [ ] SDK clients (both JS + .NET) send `X-Observability-SDK-Version: <semver>` header on every request
+- [ ] Backend logs a `Warning` when an SDK on a version older than a configurable floor connects; no rejection, just visibility
+- [ ] `docs/api-contract.md` documents version negotiation + deprecation policy (recommend: support N-1 minor for 6 months, drop with a major release)
+- [ ] SDKs continue to call unprefixed paths until next major SDK version to avoid breaking deployed consumers
+
+**Investigation questions:**
+- Header vs. property: send SDK version in `X-Observability-SDK-Version` (clean) or as an event `_sdk_version` property (visible to allowlist)? Lean: header.
+- Should we reject SDKs below a floor, or just log? Lean: log indefinitely; reject only with a major-version drop.
+
+### Issue 10.5 — Bulk data export API
+
+**Description:** The pitch over PostHog was "we own our data." Today the only retrieval paths are paginated dashboard endpoints. No bulk export. If someone wants to feed a warehouse, run compliance analysis, or migrate off the platform later, they hit hand-written SQL or scraping.
+
+**Acceptance criteria:**
+- [ ] `GET /api/admin/export/events?app=&env=&from=&to=&format=ndjson` — streamed NDJSON response (chunked `Transfer-Encoding`, not buffered in memory)
+- [ ] Same shape for `/api/admin/export/errors` and `/api/admin/export/safety-violations`
+- [ ] Admin-key gated (`X-Observability-Admin-Key` — same gate as 8.9 admin endpoints; replaced by 8.6 RBAC when it lands)
+- [ ] One audit row per export (who, when, what filter, row count)
+- [ ] Reasonable cap on time-range per request (suggest: 90 days max — point to a future archive endpoint for older data)
+- [ ] Integration test: export of seeded data returns NDJSON whose row count matches the database
+
+**Investigation questions:**
+- Format: NDJSON streamed (recommended), CSV (loses nested `properties_json`), Parquet (good for analytics, heavyweight dependency)?
+- Should `properties_json` be returned raw, unrolled, or both? Lean: raw, because that's what's stored.
+
+### Issue 10.6 — Self-service admin UI
+
+**Description:** 8.9 admin endpoints exist but are CLI-only (the user-facing path today is `scripts/onboard-sch.ps1`). For "multiple internal apps to onboard at scale" — the original mission — onboarding shouldn't require running a PowerShell script. The dashboard should have an Admin section: list apps, mint keys, revoke keys, view audit log. Removes the Brandon/Arlo bottleneck for every onboarding.
+
+**Acceptance criteria:**
+- [ ] Dashboard navigation adds "Admin" link (visible only when 8.6 RBAC grants Admin role; until 8.6 lands, gated by a feature flag or admin-key prompt)
+- [ ] Apps page: list (existing `/api/apps`), create (calls `POST /api/admin/apps`), view environments + key counts
+- [ ] Keys page (per env): mint (shows plaintext once with a copy button + warning that it's not retrievable), revoke (new endpoint), list with masked key id + created date + last-used
+- [ ] Audit log page: read-only `GET /api/admin/audit?action=&from=&to=` (new endpoint, also closes 8.7's read-only audit view requirement)
+- [ ] New endpoints: `POST /api/admin/apps/{slug}/environments/{env}/keys/{id}/revoke`; `GET /api/admin/audit`
+- [ ] Cypress / Playwright smoke test: mint key → use it on `/api/ingest/events` → revoke → confirm 401
+
+**Note:** this overlaps with 8.7's "read-only audit view" — the audit log page in 10.6 IS the 8.7 view. When 10.6 lands, mark 8.7's third acceptance criterion as closed.
+
+### Issue 10.7 — Compliance + DR runbook
+
+**Description:** PHI/PII storage requires documented compliance posture and a tested disaster-recovery plan. The plan today mentions a "privacy reviewer sign-off" gate but doesn't enumerate what they're signing off on, and "automated backups exist" is not the same as "we know we can restore."
+
+**Acceptance criteria:**
+- [ ] `docs/compliance.md` documents:
+  - BAA with Microsoft (verified state + ticket/contract reference)
+  - Azure SQL TDE / encryption-at-rest (verified default; document any deviation)
+  - Azure Key Vault encryption-at-rest defaults
+  - Network posture trade-off (public + firewall vs. private endpoint — current decision and rationale)
+  - Audit log retention duration (`AuditLogs` table — defined here, enforced by 8.5 retention job when it lands)
+- [ ] `docs/disaster-recovery.md` documents:
+  - Azure SQL PITR retention (default 7 days; document if LTR is needed)
+  - Restore procedure step-by-step against `obs-api-dev` first
+  - One drill executed and recorded with date + result (must be done before 6.8)
+  - Communication plan if Prod ingest is down > 1 hour
+- [ ] Privacy/compliance reviewer sign-off recorded in `docs/compliance.md`
+
+### Issue 10.8 — Dogfood the SDK
+
+**Description:** `adaptive-observability` is a .NET ASP.NET Core app that emits no telemetry to itself. Dogfooding `AdaptiveSoftwareLLC.ObservabilityClient` against the platform's own API catches SDK breakages in CI and during deploys, before any onboarded app sees them. It also gives us a free quality-control loop for every SDK release.
+
+**Acceptance criteria:**
+- [ ] An `adaptive-observability-meta` app row provisioned via 8.9 admin endpoints (Dev + Prod)
+- [ ] `obs-api-dev` and `obs-api-prod` register the SDK via `AddAdaptiveObservability(...)` pointing at *themselves*
+- [ ] `server_error_occurred` events from real platform exceptions appear in the dashboard under the meta-app
+- [ ] Loop guard: the SDK already swallows transport failures silently, so a failing ingest path won't recursively emit. Document this constraint in `architecture.md`.
+- [ ] During the next SDK version bump, the meta-app's event count is a regression signal (no events appearing = SDK broke)
+
+### Issue 10.9 — Non-additive migration safety playbook
+
+**Description:** Today migrations apply on startup via `MigrateAsync` (Phase 2.4 cutover). All migrations so far are additive (new columns, new indexes), so the startup-apply pattern is safe. The first non-additive migration (column drop, rename, type change) will need a documented playbook — otherwise "deploy → app starts → ALTER TABLE → app reads new shape" is risky against live Prod traffic.
+
+**Acceptance criteria:**
+- [ ] `docs/database-migrations.md` documents:
+  - Classification: additive (safe at startup) vs. non-additive (expansion → contraction required)
+  - Expansion/contraction pattern: add new column, dual-write, backfill, switch reads, drop old column (separate releases)
+  - When a maintenance window is genuinely required vs. when expand/contract suffices
+  - Rollback strategy: roll forward with a reversing migration rather than `Down`
+- [ ] PR template gains a "migration type" checkbox so reviewers see classification
+- [ ] (Optional) Lint that fails CI on migrations containing `DropColumn` / `RenameColumn` / `AlterColumn` without an "expand-contract: N of M" comment
+
+### Issue 10.10 — SDK failure-mode documentation
+
+**Description:** SDK READMEs document the API surface but not what happens when ingestion is unreachable, slow, or returning 5xx. Operators of onboarded apps need to know whether to expect retries, dropped events, or buffered events, and how to detect the failure.
+
+**Acceptance criteria:**
+- [ ] `packages/observability-client-js/README.md` "Failure modes" section covers:
+  - Network unreachable: batches retry with exponential backoff (current count + cap)
+  - After N retries: events dropped silently (no localStorage queue; events lost on tab close while pending)
+  - 4xx vs. 5xx response handling
+  - Backpressure: batch buffer cap and overflow behavior
+- [ ] `packages/observability-client-dotnet/README.md` covers the equivalent .NET semantics (bounded `Channel<T>` queue, oldest dropped when full, no disk-backed persistence)
+- [ ] Each README has a "Troubleshooting: events don't appear" checklist
+- [ ] (Optional) Each SDK exposes a `TransportStatus` callback so host apps can detect ingestion outages and surface them in their own ops tooling
+
+### Issue 10.11 — CODEOWNERS for privacy + security files
+
+**Description:** The privacy allowlist (`docs/privacy-rules.md`, `docs/event-catalog.md`, `PropertyAllowlistValidator.cs`) is the most safety-critical surface in the platform. Today any contributor can edit it without forced review. CODEOWNERS + branch protection makes the "new allowed fields require reviewer approval" rule actually enforceable.
+
+**Acceptance criteria:**
+- [ ] `.github/CODEOWNERS` requires Brandon + Arlo review on:
+  - `docs/privacy-rules.md`
+  - `docs/event-catalog.md`
+  - `backend/src/Observability.Application/Ingestion/PropertyAllowlistValidator.cs`
+  - `backend/src/Observability.Application/Ingestion/**/*Allowlist*.cs`
+  - `.github/workflows/canary.yml` (the 10.2 canary itself)
+  - `.github/CODEOWNERS` (self-protection)
+- [ ] Branch protection on `main` requires CODEOWNER review for protected paths
+- [ ] PR template includes a "touches privacy-rules.md or allowlist code?" checkbox so reviewers don't auto-approve
+
+**Investigation questions:**
+- Who else should be on CODEOWNERS? Any compliance / legal contact?
 
 ---
 
