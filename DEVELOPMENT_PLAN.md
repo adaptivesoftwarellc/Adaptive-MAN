@@ -461,9 +461,19 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 ### Issue 6.6 — Onboard SCH apps in adaptive-observability dashboard
 **Description:** Create dashboard rows + provision keys. Pure admin work in this repo's dashboard.
 **Acceptance criteria:**
-- [ ] `SCH_UI` and `SCH_API` rows created with Dev/UAT/Prod environments
-- [ ] Public + server API keys provisioned and stored in SCH's secret stores (Key Vault)
+- [x] `SCH_UI` and `SCH_API` rows created (2026-05-24 via `scripts/onboard-sch.ps1`); per the Option A re-scope, only `Development` + `Production` environments exist on the platform — SCH UAT emits to `obs-api-dev` during the shakedown
+- [ ] Public + server API keys provisioned and stored in SCH's secret stores (Key Vault). **Status (2026-05-25): Dev side complete or in flight; Prod side blocked — see follow-up below.**
 - [ ] Smoke event from each environment lands in adaptive-observability with correct app/env attribution
+
+**Follow-up — SCH_API Prod + SCH_UI Prod secret wiring (deferred to cutover prep, Issue 6.8):**
+- SCH_API Prod App Service and its Key Vault are not in the `Adaptive Subscription` (verified 2026-05-25 — no SCH App Service or Prod KV visible to the platform owner). Owned by Brandon. Needed before 6.8:
+  - Identify the Prod KV name + Prod App Service name from SCH side
+  - Set 4 KV secrets: `AdaptiveObservability--ApiKey` (the Prod `aoserv_…` key minted by `onboard-sch.ps1`), `AdaptiveObservability--HostUrl`, `AdaptiveObservability--Enabled=true`, `AdaptiveObservability--Environment=Production`
+  - Until the 5-day shakedown passes, `HostUrl` points at `obs-api-dev`; flip to `obs-api-prod` only after Adaptive Prod is verified healthy and the soak is clean
+- SCH_UI Prod GitHub repo secrets (Brandon-owned repo settings):
+  - `VITE_OBSERVABILITY_URL` (= `obs-api-dev` during shakedown, `obs-api-prod` at cutover)
+  - `VITE_OBSERVABILITY_KEY` (the Prod `aopub_…` key from `onboard-sch.ps1`)
+- WMS Phase 7 onboarding will hit the same subscription-isolation pattern; consider a documented "Prod onboarding handoff checklist" for hosters before that phase starts.
 
 ### Issue 6.7 — Dev shakedown soak + privacy validation
 **Description:** Replaces former dual-write parity gate. **Option A (2026-05-22):** SCH Dev runs against `obs-api-dev` for 5 business days; daily safety-violation check. No UAT step — platform has no UAT environment.

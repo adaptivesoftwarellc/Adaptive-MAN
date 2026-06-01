@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Phase 6.6 — onboard SCH_UI + SCH_API in adaptive-observability.
+    Phase 6.6 -- onboard SCH_UI + SCH_API in adaptive-observability.
 
 .DESCRIPTION
     Idempotent. Creates the two SCH application rows + Dev/Prod environments,
     then mints one PublicClient key (for SCH_UI) and one ServerApi key
-    (for SCH_API) per environment. Plaintext key values are printed once —
+    (for SCH_API) per environment. Plaintext key values are printed once --
     capture them and store in SCH's secrets immediately. They are NOT
     retrievable from the platform after this script exits.
 
@@ -58,7 +58,8 @@ function Create-App([string]$slug, [string]$name, [string]$description) {
         -Uri "$ApiBase/api/admin/apps" `
         -Headers $headers `
         -Body $body
-    Write-Host ("  -> created={0} app_id={1} envs={2}" -f $resp.created, $resp.application_id, ($resp.environments -join ","))
+    $envNames = ($resp.environments | ForEach-Object { $_.name }) -join ","
+    Write-Host ("  -> created={0} app_id={1} envs={2}" -f $resp.created, $resp.id, $envNames)
     return $resp
 }
 
@@ -71,17 +72,17 @@ function Mint-Key([string]$slug, [string]$env, [string]$keyType) {
         -Uri "$ApiBase/api/admin/apps/$slug/environments/$env/keys" `
         -Headers $headers `
         -Body $body
-    Write-Host "  PLAINTEXT KEY (shown once — capture now):" -ForegroundColor Yellow
-    Write-Host ("    {0}" -f $resp.key) -ForegroundColor Yellow
-    Write-Host ("  prefix={0}  key_type={1}  env={2}" -f $resp.key_prefix, $resp.key_type, $env)
+    Write-Host "  PLAINTEXT KEY (shown once -- capture now):" -ForegroundColor Yellow
+    Write-Host ("    {0}" -f $resp.plaintext_key) -ForegroundColor Yellow
+    Write-Host ("  key_id={0}  key_type={1}  env={2}" -f $resp.id, $resp.key_type, $env)
     return $resp
 }
 
-Write-Host "=== Adaptive Observability — SCH onboarding (Phase 6.6) ==="
+Write-Host "=== Adaptive Observability -- SCH onboarding (Phase 6.6) ==="
 Write-Host "API base: $ApiBase"
 
-Create-App -slug "sch-ui"  -name "SCH UI"  -description "Strategic Health Care — frontend (React + Vite + MSAL)" | Out-Null
-Create-App -slug "sch-api" -name "SCH API" -description "Strategic Health Care — backend (.NET 10, ASP.NET Core)"  | Out-Null
+Create-App -slug "sch-ui"  -name "SCH UI"  -description "Strategic Health Care -- frontend (React + Vite + MSAL)" | Out-Null
+Create-App -slug "sch-api" -name "SCH API" -description "Strategic Health Care -- backend (.NET 10, ASP.NET Core)"  | Out-Null
 
 Write-Host ""
 Write-Host "--- Minting public-client keys for SCH_UI ---"
