@@ -1,56 +1,360 @@
-import { NavLink } from 'react-router-dom';
-import { presets, presetHref } from '../lib/presets';
+import { useState } from 'react';
+import { Link, NavLink, useLocation } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import {
+  builtinViews,
+  viewHref,
+  loadUserViews,
+  addUserView,
+  deleteUserView,
+} from '../lib/presets';
+import type { DashboardView, ViewPage } from '../lib/presets';
+import { useFilters } from '../lib/filters';
+import { USE_MOCKS, setMockMode } from '../lib/api';
+import {
+  ActivityIcon,
+  AlertTriangleIcon,
+  ListIcon,
+  ClockIcon,
+  GridIcon,
+  BeakerIcon,
+  ArrowRightIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  XIcon,
+} from './icons';
 
-const links = [
-  { to: '/health', label: 'Health' },
-  { to: '/errors', label: 'Errors' },
-  { to: '/events', label: 'Events' },
-  { to: '/sessions', label: 'Sessions' },
-  { to: '/admin/apps', label: 'Apps' },
+const links: { to: string; label: string; icon: ReactNode }[] = [
+  { to: '/health', label: 'Health', icon: <ActivityIcon /> },
+  { to: '/errors', label: 'Errors', icon: <AlertTriangleIcon /> },
+  { to: '/events', label: 'Events', icon: <ListIcon /> },
+  { to: '/sessions', label: 'Sessions', icon: <ClockIcon /> },
+  { to: '/admin/apps', label: 'Apps', icon: <GridIcon /> },
 ];
 
+const COLLAPSE_KEY = 'observability:sidebar-collapsed';
+
+function pageFromPath(pathname: string): ViewPage | null {
+  if (pathname.startsWith('/health')) return 'health';
+  if (pathname.startsWith('/errors')) return 'errors';
+  if (pathname.startsWith('/events')) return 'events';
+  if (pathname.startsWith('/sessions')) return 'sessions';
+  return null;
+}
+
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export function Sidebar() {
+  const location = useLocation();
+  const { filters } = useFilters();
+
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [userViews, setUserViews] = useState<DashboardView[]>(loadUserViews);
+  const [showSave, setShowSave] = useState(false);
+  const [name, setName] = useState('');
+
+  const currentPage = pageFromPath(location.pathname);
+  const canSave = currentPage !== null && !!filters.app && !!filters.env;
+
+  const isViewActive = (v: DashboardView) =>
+    v.page === currentPage && v.app === filters.app && v.env === filters.env && v.range === filters.range;
+
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    if (!canSave || !currentPage) return;
+    const label = name.trim() || `${cap(currentPage)} · ${filters.env}`;
+    setUserViews(
+      addUserView({
+        label,
+        page: currentPage,
+        app: filters.app,
+        env: filters.env,
+        range: filters.range,
+        from: filters.from,
+        to: filters.to,
+      }),
+    );
+    setName('');
+    setShowSave(false);
+  };
+
   return (
-    <aside className="flex w-48 flex-col border-r bg-slate-900 text-slate-100">
-      <div className="px-5 py-4">
-        <div className="text-sm font-semibold">adaptive-observability</div>
-        <div className="text-xs text-slate-400">internal dashboard</div>
+    <aside
+      className={`flex shrink-0 flex-col border-r border-slate-800/60 bg-slate-900 text-slate-100 transition-[width] duration-200 ease-in-out ${
+        collapsed ? 'w-[68px]' : 'w-60'
+      }`}
+    >
+      {/* Brand + collapse toggle */}
+      <div className={`flex items-center py-5 ${collapsed ? 'flex-col gap-3 px-2' : 'gap-3 px-5'}`}>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-bold text-white shadow-sm">
+          AO
+        </div>
+        {!collapsed && (
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-sm font-semibold text-white">Adaptive</div>
+            <div className="truncate text-xs text-slate-400">Observability</div>
+          </div>
+        )}
+        <button
+          onClick={toggle}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+        </button>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 px-2 pb-4">
+
+      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4 scrollbar-thin">
+        {!collapsed && <SectionLabel>Dashboards</SectionLabel>}
         {links.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
+            title={collapsed ? l.label : undefined}
             className={({ isActive }) =>
-              `rounded px-3 py-2 text-sm transition ${
-                isActive ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'
+              `group relative flex items-center rounded-lg py-2 text-sm font-medium transition ${
+                collapsed ? 'justify-center px-0' : 'gap-3 px-3'
+              } ${
+                isActive ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-100'
               }`
             }
           >
-            {l.label}
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-brand-400" />
+                )}
+                <span className={isActive ? 'text-brand-300' : 'text-slate-500 group-hover:text-slate-300'}>
+                  {l.icon}
+                </span>
+                {!collapsed && l.label}
+              </>
+            )}
           </NavLink>
         ))}
 
-        <div className="mt-4 px-3 text-[10px] uppercase tracking-wider text-slate-500">
-          Presets
-        </div>
-        {presets.map((p) => (
-          <NavLink
-            key={p.id}
-            to={presetHref(p)}
-            className={({ isActive }) =>
-              `rounded px-3 py-1.5 text-xs transition ${
-                isActive ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-800'
-              }`
-            }
-          >
-            {p.label}
-          </NavLink>
-        ))}
+        {!collapsed && (
+          <CollapsibleSection title="Quick views" storageKey="observability:section:quick-views">
+            {builtinViews.map((v) => (
+              <ViewLink key={v.id} view={v} active={isViewActive(v)} />
+            ))}
+            {userViews.map((v) => (
+              <ViewLink
+                key={v.id}
+                view={v}
+                active={isViewActive(v)}
+                onDelete={() => setUserViews(deleteUserView(v.id))}
+              />
+            ))}
+
+            {showSave ? (
+                <div className="mt-1 px-1">
+                  <input
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSave();
+                      if (e.key === 'Escape') {
+                        setShowSave(false);
+                        setName('');
+                      }
+                    }}
+                    placeholder="View name"
+                    className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-100 placeholder:text-slate-500"
+                  />
+                  <div className="mt-1 flex gap-1">
+                    <button
+                      onClick={handleSave}
+                      className="flex-1 rounded-md bg-brand-600 px-2 py-1 text-xs font-medium text-white transition hover:bg-brand-500"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowSave(false);
+                        setName('');
+                      }}
+                      className="rounded-md px-2 py-1 text-xs text-slate-400 transition hover:text-slate-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowSave(true)}
+                  disabled={!canSave}
+                  title={canSave ? 'Save the current app / environment / range as a view' : 'Pick an app & environment first'}
+                  className="mt-1 flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <PlusIcon className="h-3.5 w-3.5" /> Save current view
+                </button>
+              )}
+            </CollapsibleSection>
+        )}
       </nav>
-      <div className="px-5 py-3 text-[10px] text-slate-500">
-        TODO: replace with real auth (Phase 8)
+
+      {/* Demo-data toggle */}
+      <div className="border-t border-slate-800/60 px-3 py-3">
+        {collapsed ? (
+          <button
+            onClick={() => setMockMode(!USE_MOCKS)}
+            className="flex w-full items-center justify-center rounded-lg py-2 transition hover:bg-slate-800/60"
+            title={USE_MOCKS ? 'Demo data: on (click to use live backend)' : 'Demo data: off (click to show sample reports)'}
+            aria-label="Toggle demo data"
+          >
+            <BeakerIcon className={`h-4 w-4 ${USE_MOCKS ? 'text-amber-300' : 'text-slate-500'}`} />
+          </button>
+        ) : (
+          <button
+            onClick={() => setMockMode(!USE_MOCKS)}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-xs transition hover:bg-slate-800/60"
+            title="Toggle sample data for the dashboard"
+          >
+            <BeakerIcon className={`h-4 w-4 shrink-0 ${USE_MOCKS ? 'text-amber-300' : 'text-slate-500'}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block font-medium text-slate-200">Demo data</span>
+              <span className="block truncate text-[11px] text-slate-500">
+                {USE_MOCKS ? 'Showing sample reports' : 'Using live backend'}
+              </span>
+            </span>
+            <Switch on={USE_MOCKS} />
+          </button>
+        )}
       </div>
     </aside>
+  );
+}
+
+function ViewLink({
+  view,
+  active,
+  onDelete,
+}: {
+  view: DashboardView;
+  active: boolean;
+  onDelete?: () => void;
+}) {
+  return (
+    <div className="group/item relative">
+      <Link
+        to={viewHref(view)}
+        className={`flex items-center justify-between rounded-lg py-1.5 pl-3 text-xs transition ${
+          onDelete ? 'pr-8' : 'pr-3'
+        } ${active ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}
+      >
+        <span className="truncate">{view.label}</span>
+        {!onDelete && (
+          <ArrowRightIcon className="h-3 w-3 shrink-0 opacity-0 transition group-hover/item:opacity-60" />
+        )}
+      </Link>
+      {onDelete && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            onDelete();
+          }}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 opacity-0 transition hover:bg-slate-700 hover:text-rose-300 group-hover/item:opacity-100"
+          title="Delete view"
+          aria-label="Delete view"
+        >
+          <XIcon className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SectionLabel({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+/** A collapsible sidebar section whose open/closed state persists in localStorage. */
+function CollapsibleSection({
+  title,
+  storageKey,
+  children,
+}: {
+  title: string;
+  storageKey: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(storageKey) !== '0';
+    } catch {
+      return true;
+    }
+  });
+
+  const toggle = () => {
+    setOpen((o) => {
+      const next = !o;
+      try {
+        localStorage.setItem(storageKey, next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="mt-5">
+      <button
+        onClick={toggle}
+        aria-expanded={open}
+        className="group flex w-full items-center justify-between rounded-md px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 transition hover:text-slate-300"
+      >
+        <span>{title}</span>
+        <ChevronDownIcon
+          className={`h-3 w-3 text-slate-600 transition-transform duration-200 group-hover:text-slate-400 ${
+            open ? '' : '-rotate-90'
+          }`}
+        />
+      </button>
+      {open && <div className="flex flex-col gap-0.5">{children}</div>}
+    </div>
+  );
+}
+
+function Switch({ on }: { on: boolean }) {
+  return (
+    <span
+      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition ${
+        on ? 'bg-amber-400' : 'bg-slate-600'
+      }`}
+    >
+      <span
+        className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${
+          on ? 'translate-x-3.5' : 'translate-x-0.5'
+        }`}
+      />
+    </span>
   );
 }

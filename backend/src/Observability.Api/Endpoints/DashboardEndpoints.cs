@@ -145,6 +145,7 @@ public static class DashboardEndpoints
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] string? sort,
+        [FromQuery] string? category,
         [FromQuery] int? page,
         [FromQuery] int? pageSize,
         ObservabilityDbContext db,
@@ -159,6 +160,16 @@ public static class DashboardEndpoints
         var query = db.Errors.AsNoTracking()
             .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
                         && e.LastSeenAt >= range.From && e.LastSeenAt < range.To);
+
+        // Category is derived from which fields are populated, matching the ingestion classifier:
+        // exception_type => backend server error; else job_name => background job; else frontend.
+        query = category switch
+        {
+            "server" => query.Where(e => e.ExceptionType != null),
+            "background_job" => query.Where(e => e.ExceptionType == null && e.JobName != null),
+            "frontend" => query.Where(e => e.ExceptionType == null && e.JobName == null),
+            _ => query,
+        };
 
         query = sort switch
         {
