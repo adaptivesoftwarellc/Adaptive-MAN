@@ -413,8 +413,8 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 ### Issue 6.1 — Hardening prereqs (in this repo and SCH)
 **Description:** Items previously folded into "deferred PostHog hardening" still apply to a fresh adaptive-observability integration. Resolve before SCH UAT.
 **Acceptance criteria:**
-- [ ] 4.11 (SDK auto-bracket sessions) shipped — without this, SCH `Sessions` rows are never written and Phase 5 timelines stay empty
-- [ ] 4.2 (SCH route fixture port) — port the validated regression suite from SCH_UI's `routeUtils.ts` tests into `packages/observability-client-js/src/__tests__/`
+- [x] 4.11 (SDK auto-bracket sessions) shipped — `sessionBracket.ts` + live-ingest test against `obs-api-dev` (2026-05-22, see 5.7)
+- [x] 4.2 (SCH route fixture port) — validated regression suite ported to `packages/observability-client-js/src/__tests__/schParity.test.ts` + `sch-fixtures/`
 - [ ] 5.5 verification harness — trace one SCH Dev request FE → BE → ingestion and confirm the same correlation id lands on both `api_request_failed` (FE) and `server_error_occurred` (BE)
 - [x] EF `Initial` migration generated and `EnsureCreatedAsync` switched to `MigrateAsync` (owned by Phase 2.4) — required before the first non-Dev deploy *(shipped `75ef382`)*
 - [x] Phase 2.3 hosting + 2.4 DB cutover at least Dev — required for SCH Dev shakedown to have somewhere to ingest *(Dev live 2026-05-22; Prod pending first CI deploy)*
@@ -435,11 +435,13 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 ### Issue 6.3 — Implement adaptive-observability in SCH_UI
 **Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and rewire onto `observability-client-js`. The SDK API surface mirrors the PostHog branch's `analytics.ts` so most scaffolding ports unchanged; PostHog imports and `posthog.*` direct calls are replaced.
 **Acceptance criteria:**
-- [ ] `feature/adaptive-observability` branched from current `dev` on SCH_UI
-- [ ] `analytics.ts` (or equivalent) backed by `observability-client-js`
-- [ ] All Phase 1 emission points wired (login/logout, page views, API failures, exceptions)
-- [ ] Compile-time event allowlist preserved (TypeScript unions)
-- [ ] No `posthog-js` dependency added
+- [x] `feature/adaptive-observability` branched from current `dev` on SCH_UI
+- [x] `analytics.ts` (or equivalent) backed by `observability-client-js`
+- [x] All Phase 1 emission points wired (login/logout, page views, API failures, exceptions)
+- [x] Compile-time event allowlist preserved (TypeScript unions)
+- [x] No `posthog-js` dependency added
+
+*(Closed via SCH_UI PR #113 "Wire Adaptive Observability SDK (Phase 6.1 + 6.3)", merged to `dev` 2026-05-24.)*
 
 ### Issue 6.4 — Audit SCH_API integration touchpoints
 **Description:** Catalog files that change. Expected: `Program.cs` (DI), `appsettings.json` (`AdaptiveObservability` section), new `AdaptiveObservabilityService` (or direct SDK consumption), `GlobalExceptionMiddleware.cs`, all 8 BG services.
@@ -452,12 +454,14 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 ### Issue 6.5 — Implement adaptive-observability in SCH_API
 **Description:** Cherry-pick analytics scaffolding from `feature/posthog-implementation` and wire to the SDK's `AddAdaptiveObservability(...)`. SCH adopts the SDK's own `IAnalyticsService` (namespace `Adaptive.ObservabilityClient`, shipped via NuGet id `AdaptiveSoftwareLLC.ObservabilityClient`) rather than its local copy from the unmerged PostHog branch.
 **Acceptance criteria:**
-- [ ] `feature/adaptive-observability` branched from current `dev` on SCH_API
-- [ ] DI registration via `AddAdaptiveObservability(...)`
-- [ ] `GlobalExceptionMiddleware` ported (emits `server_error_occurred` on true 500s only)
-- [ ] All 8 BG services emit `background_job_failed` from catch blocks
-- [ ] `appsettings.json` gains `AdaptiveObservability` section
-- [ ] Correlation ID middleware ported
+- [x] `feature/adaptive-observability` branched from current `dev` on SCH_API
+- [x] DI registration via `AddAdaptiveObservability(...)`
+- [x] `GlobalExceptionMiddleware` ported (emits `server_error_occurred` on true 500s only)
+- [x] All 8 BG services emit `background_job_failed` from catch blocks
+- [x] `appsettings.json` gains `AdaptiveObservability` section
+- [x] Correlation ID middleware ported
+
+*(Closed via SCH_API PR #177 "Wire Adaptive Observability SDK (Phase 6.1 + 6.5)", merged to `dev` 2026-05-24.)*
 
 ### Issue 6.6 — Onboard SCH apps in adaptive-observability dashboard
 **Description:** Create dashboard rows + provision keys. Pure admin work in this repo's dashboard.
@@ -496,8 +500,10 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 ### Issue 6.9 — SCH-specific dashboard preset
 **Description:** Saved dashboard view with SCH selected by default. Replaces the planned "SCH Phase 1 Health Dashboard." This is the only Phase 6 issue that lands in *this* repo (frontend-only).
 **Acceptance criteria:**
-- [ ] Saved view reachable via dashboard nav
-- [ ] Cards match the original PostHog dashboard plan (`POSTHOG_DASHBOARD_PLAN.md` in SCH)
+- [x] Saved view reachable via dashboard nav
+- [x] Cards match the original PostHog dashboard plan (`POSTHOG_DASHBOARD_PLAN.md` in SCH)
+
+*(Closed via PR #15 "Phase 6.9: SCH dashboard presets", merged 2026-05-23.)*
 
 ---
 
@@ -505,7 +511,7 @@ These are improvements, not regressions — SCH cutover will see better normaliz
 
 **Goal:** Onboard `WMSSite` (UI) + `WMSAPI` (backend) using the SDKs and integration pattern validated by SCH onboarding. Replaces the original `SecondApp_*` placeholders.
 
-**Exit criteria:** WMS apps emit the Phase 1 event set to adaptive-observability UAT with zero `SafetyViolations`; multi-app dashboard switching validated; cross-process timeline join works for at least one WMS error.
+**Exit criteria:** WMS apps emit the Phase 1 event set to adaptive-observability Dev (`obs-api-dev` — the platform has no UAT env, per the Option A re-scope) with zero `SafetyViolations`; multi-app dashboard switching validated; cross-process timeline join works for at least one WMS error.
 
 **Verified state (snapshot 2026-04-30):**
 - **WMSSite** (active branch `feature/provider-intake-dropdown`): React 18 + Vite, **JavaScript/JSX (not TypeScript)** — `jsconfig.json`, no `tsconfig.json`. Auth: **MSAL** (`@azure/msal-browser`, `@azure/msal-react`) — Entra/Azure AD, not custom JWT. UI: MUI (not Tailwind/shadcn). Data: TanStack Query + Axios. Sensitive surfaces visible in `src/sections/` include intake, provider notes, wound assessment, regional reports.
@@ -714,7 +720,7 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 - [ ] Default 64 KB payload max
 - [ ] 429 + `Retry-After`
 
-### Issue 8.9 — Ingestion queue
+### Issue 8.12 — Ingestion queue
 **Description:** Decouple receive from DB write at scale.
 **Acceptance criteria:**
 - [ ] Receive enqueues; worker drains
@@ -730,7 +736,7 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 - [ ] Indexes added with measured before/after
 
 ### Issue 8.11 — Key rotation runbook
-**Description:** Exercise a Key Vault secret rotation in UAT.
+**Description:** Exercise a Key Vault secret rotation as a Dev rotation drill (against the Dev vault), and validate the Prod rotation runbook via the App Service staging-slot pattern. (No UAT env exists — Option A, 2026-05-22.)
 **Acceptance criteria:**
 - [ ] Runbook in `docs/azure-key-vault-setup.md`
 - [ ] Rotation tested end-to-end
@@ -741,7 +747,7 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 
 **Goal:** Add visual session replay via `rrweb`, scoped tightly: off by default, opt-in per app+env, masked aggressively, stored in Blob, retained briefly. Replay artifacts attach to the existing Phase 5 session timeline so debugging is "click the failure → watch the last 30 seconds."
 
-**Exit criteria:** SCH UAT can opt in for a single feature area, capture-on-error mode produces a viewable replay attached to a `frontend_exception` event, masking audit signed off, prod remains disabled.
+**Exit criteria:** SCH Dev can opt in for a single feature area (emitting to `obs-api-dev` — the platform has no UAT env, per the Option A re-scope), capture-on-error mode produces a viewable replay attached to a `frontend_exception` event, masking audit signed off, prod remains disabled.
 
 **Non-goals:** Always-on prod recording, full-session capture by default, replay of any surface flagged as PHI/PII.
 
