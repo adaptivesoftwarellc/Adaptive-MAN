@@ -716,9 +716,11 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 ### Issue 8.8 — Rate limiting + payload size limits
 **Description:** Per-key rate; reject oversized payloads at the edge.
 **Acceptance criteria:**
-- [ ] Per-key req/sec configurable
-- [ ] Default 64 KB payload max
-- [ ] 429 + `Retry-After`
+- [x] Per-key req/sec configurable
+- [x] Default 64 KB payload max
+- [x] 429 + `Retry-After`
+
+**Status:** ✅ Shipped in PR A2 (`phase-prod/cutover-gates`). Built-in ASP.NET Core rate limiter (no new dependency), per-key partition, config-tunable (`Observability:RateLimiting`, default 100 req / 10 s — a conservative starting point to revisit against observed SCH volume), 64 KB cap → 413. No post-merge ops.
 
 ### Issue 8.12 — Ingestion queue
 **Description:** Decouple receive from DB write at scale.
@@ -860,54 +862,73 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 - **Should land during 6.7 soak (parallel work):** 10.4, 10.5, 10.7.
 - **Can land post-cutover:** 10.6, 10.8, 10.9, 10.10.
 
+> **PR A2 (`phase-prod/cutover-gates`):** code for the pre-cutover gates **8.8 + 10.1 + 10.2 + 10.3** has landed (10.11 CODEOWNERS landed separately). Each issue section below records what shipped vs. what remains as **post-merge ops** (canary provisioning, Azure Monitor standup) or a **tracked follow-up** (dashboard auth → 8.6; ingest-latency metric). 6.8 stays blocked until those post-merge ops are complete.
+
 ### Issue 10.1 — Multi-tenant isolation regression test
 
 **Description:** The platform's central security claim is "App A's data cannot bleed into App B's." Today this is enforced by `ApplicationId` resolving server-side from the API key — code-level only. No integration test exercises the boundary. With SCH onboarding adding the second tenant, a regression here is a privacy incident.
 
 **Acceptance criteria:**
-- [ ] New `MultiTenantIsolationTests` in `Observability.IntegrationTests` seeded with two distinct apps + envs
-- [ ] Test: App A's `aoserv_…` key POSTs an event with a spoofed `application_id` field in the payload — the persisted row uses App A's id, never the spoofed value
-- [ ] Test: App A's key against `/api/dashboard/events?app=<App-B-id>` returns either empty results or 403 — never App B's data
-- [ ] Test: same for `/api/dashboard/errors`, `/api/dashboard/sessions`, `/api/sessions/{id}/timeline`
-- [ ] Test runs in CI on every PR; failure blocks merge
+- [x] New `MultiTenantIsolationTests` in `Observability.IntegrationTests` seeded with two distinct apps + envs
+- [x] Test: App A's `aoserv_…` key POSTs an event with a spoofed `application_id` field in the payload — the persisted row uses App A's id, never the spoofed value
+- [ ] Test: App A's key against `/api/dashboard/events?app=<App-B-id>` returns either empty results or 403 — never App B's data — **deferred to 8.6** (see below)
+- [ ] Test: same for `/api/dashboard/errors`, `/api/dashboard/sessions`, `/api/sessions/{id}/timeline` — **deferred to 8.6**
+- [x] Test runs in CI on every PR; failure blocks merge
+
+**Status:** ✅ Ingestion-path isolation shipped in PR A2 (`phase-prod/cutover-gates`). Resolved the investigation question by scoping enforcement to ingestion now. Dashboard/timeline reads are unauthenticated (pre-8.6), so the read tests **assert the current leaky behavior** with loud `KNOWN_GAP_8_6` markers rather than 403/empty — they flip to the acceptance-criteria assertions when 8.6 lands.
+
+**Tracked follow-up (8.6 RBAC):** make `/api/dashboard/*` and `/api/sessions/{id}/timeline` reject cross-tenant `?app=`/session access (403 or empty). When 8.6 lands, update the two `KNOWN_GAP_8_6` tests in `MultiTenantIsolationTests` to assert the secured behavior and check the two boxes above.
 
 **Investigation questions:**
-- Today's dashboard endpoints accept `app` as a query parameter without verifying it matches the resolved api-key's `ApplicationId` (because dashboard is unauth on a trusted network). Does the test live until 8.6 RBAC lands, or do we add api-key auth to dashboard endpoints now? Lean: scope the test to the *ingestion* path immediately; dashboard isolation lands with 8.6.
+- ~~Does the test live until 8.6 RBAC lands, or do we add api-key auth to dashboard endpoints now?~~ — resolved in PR A2: scope enforcement to the *ingestion* path immediately; dashboard isolation lands with 8.6.
 
 ### Issue 10.2 — PHI allowlist regression canary
 
 **Description:** The `PropertyAllowlistValidator` + `SafetyViolations` write path is the most safety-critical surface in the platform. Today the allowlist is covered by unit + integration tests, but nothing **scheduled** verifies it in production. A regression — a forbidden field being silently allowed — would not be caught until PHI started landing in `Events`.
 
 **Acceptance criteria:**
-- [ ] `.github/workflows/canary.yml` runs daily (cron) against `obs-api-dev` and `obs-api-prod`
-- [ ] For each known-forbidden field (`email`, `username`, `display_name`, `dob`, `ssn`, `raw_url`, `exception_message`, `stack_trace`, `request_body`, `response_body`, …) the canary POSTs a synthetic event and asserts:
-  - 422 returned
-  - A `SafetyViolations` row exists for that field
-  - No `Events` row created
-- [ ] Loud failure path: GitHub issue auto-created + Teams webhook (use the same channel as 8.4 if/when it lands; until then, GitHub issue is sufficient)
-- [ ] Synthetic events use a dedicated `canary-test` app row so they're easy to filter out of dashboards
-- [ ] Canary cleans up its own `SafetyViolations` rows (or uses a retention rule that doesn't keep them long-term)
+- [x] `.github/workflows/canary.yml` runs on a schedule (cron) against `obs-api-dev` and `obs-api-prod` — *hourly* (more frequent than the original "daily")
+- [~] For each known-forbidden field the canary POSTs a synthetic event and asserts 422 / `SafetyViolations` row / no `Events` row — **scoped:** the deployed canary asserts **422** for a representative forbidden field (`email`) per env (it can't reach the DB to check rows remotely); the full DB-level assertion (422 + `SafetyViolations` row + no `Events` row) runs in the in-process `CanaryAllowlistTests` mirror, and the full forbidden-field matrix is covered by `PropertyAllowlistValidatorTests` + `IngestionEndpointsTests`.
+- [x] Loud failure path: GitHub issue auto-created (dedup-guarded). Teams webhook deferred until 8.4 lands (criterion allows GitHub-issue-only until then)
+- [x] Synthetic events use a dedicated `canary-test` app row, namespaced out of the dashboard via `Observability:CanaryApplicationId`
+- [~] Canary keeps its rows out of real tenants' dashboards via the `CanaryApplicationId` filter; long-term **pruning** is deferred to 8.5 retention (not yet landed)
+
+**Status:** ✅ Code shipped in PR A2 (`phase-prod/cutover-gates`): `canary.yml`, `scripts/provision-canary.ps1`, dashboard namespacing, and the local mirror test. Resolved the investigation question by running both Dev + Prod.
+
+**Post-merge ops (tracked — requires `az` login + repo admin):**
+- [ ] Run `scripts/provision-canary.ps1` against Dev and Prod (creates the `canary-test` app + a ServerApi key per env)
+- [ ] Set GitHub repo secrets: `CANARY_KEY_DEV`, `CANARY_KEY_PROD` (and capture `CANARY_APP_ID`)
+- [ ] Set the `Observability:CanaryApplicationId` app setting on `obs-api-dev` **and** `obs-api-prod` to the canary app id
+- [ ] Dry-run the workflow via `workflow_dispatch` against Dev before relying on the hourly cron
 
 **Investigation questions:**
-- Do we run against Prod with a canary key, or only against Dev? Lean: both, with a `canary-test` app row in each env. The Prod canary catches Prod-specific configuration drift (e.g., a pepper rotation that mismatched).
+- ~~Do we run against Prod with a canary key, or only against Dev?~~ — resolved in PR A2: both, with a `canary-test` app row in each env.
 
 ### Issue 10.3 — Platform self-monitoring + SLOs
 
 **Description:** The plan has alert rules (8.3) for *app* errors. There's no plan for **who watches the platform itself**. If `obs-api-prod` goes down, SCH errors silently stop landing (SDK swallows transport failures by design) and nobody at either side knows. The platform also lacks defined SLOs, so "is it healthy" has no answer.
 
 **Acceptance criteria:**
-- [ ] `docs/slo.md` defines:
+- [x] `docs/slo.md` defines:
   - Availability target: 99.5% on `/api/ingest/*` rolling 30-day
   - Ingest latency target: p95 < 200ms (write path)
   - Error budget burn-rate alert thresholds
-- [ ] External uptime check on `/health` for `obs-api-prod` (Azure Monitor / Better Uptime / UptimeRobot — pick at implementation, reuse whatever Adaptive already uses)
-- [ ] Dev environment uptime check optional; if added, alerts to email only (no paging)
-- [ ] Pager/Teams channel for Prod outage notification
-- [ ] `docs/runbooks/platform-outage.md` covers first-response steps when the uptime check fires
+- [ ] External uptime check on `/health` for `obs-api-prod` — **config documented in `slo.md` §3; resource not yet stood up (post-merge ops)**
+- [ ] Dev environment uptime check optional; if added, alerts to email only (no paging) — **documented; post-merge ops**
+- [ ] Pager/Teams channel for Prod outage notification — **email-only acceptable for cutover; Teams deferred to 8.4**
+- [x] `docs/runbooks/platform-outage.md` covers first-response steps when the uptime check fires
+
+**Status:** ✅ Docs shipped in PR A2 (`phase-prod/cutover-gates`): `docs/slo.md` (SLOs + burn-rate alerts + the chosen tool's config) and `docs/runbooks/platform-outage.md`. Resolved the investigation question: no existing uptime tool → **Azure Monitor Availability Tests** (new), documented rather than captured as IaC.
+
+**Post-merge ops (tracked — requires Azure portal / `az` login):**
+- [ ] Create the Azure Monitor availability test for `obs-api-prod` (and Dev) per `docs/slo.md` §3
+- [ ] Create the `ag-obs-oncall` action group (email; Teams when 8.4 lands) and the burn-rate alert rules (`slo.md` §2)
+
+**Tracked follow-up:** SLO-2 (p95 ingest latency) is **stated but not yet measured** — `/health` probes don't time the ingest write path. Closing it needs a server-side ingest-latency metric (App Insights custom metric or histogram on `IngestionService`); see `docs/slo.md` §5.
 
 **Investigation questions:**
-- Does Adaptive have an existing uptime tool? If so, reuse. If not, recommend Azure Monitor Availability Tests (cheapest path; already in Azure).
-- How is SLO breach communicated externally? Onboarded apps (SCH, WMS) don't currently know when the platform is degraded.
+- ~~Does Adaptive have an existing uptime tool?~~ — resolved in PR A2: none; using Azure Monitor Availability Tests.
+- How is SLO breach communicated externally? Onboarded apps (SCH, WMS) don't currently know when the platform is degraded. *(Still open — external-status communication is out of scope for A2.)*
 
 ### Issue 10.4 — API versioning strategy
 

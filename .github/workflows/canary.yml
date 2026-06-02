@@ -1,0 +1,88 @@
+name: phi-allowlist-canary
+
+# Issue 10.2 — scheduled regression canary. Proves the *deployed* platform still rejects
+# forbidden (PHI) fields. Sends a known-forbidden field to /api/ingest/events against each
+# environment and asserts a 422 allowlist_violation. A 2xx means the allowlist regressed —
+# the job fails and opens a GitHub issue.
+#
+# Prereqs (one-time, see scripts/provision-canary.ps1):
+#   secrets: CANARY_KEY_DEV, CANARY_KEY_PROD
+# Canary rows are namespaced out of the dashboard via Observability:CanaryApplicationId.
+
+on:
+  schedule:
+    - cron: "17 * * * *" # hourly at :17 (offset to avoid the top-of-hour crowd)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  allowlist-canary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env: dev
+            base_url: https://obs-api-dev.azurewebsites.net
+            key_secret: CANARY_KEY_DEV
+          - env: prod
+            base_url: https://obs-api-prod.azurewebsites.net
+            key_secret: CANARY_KEY_PROD
+    steps:
+      - name: Probe allowlist rejects a forbidden field
+        env:
+          CANARY_KEY: ${{ secrets[matrix.key_secret] }}
+          BASE_URL: ${{ matrix.base_url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CANARY_KEY}" ]; then
+            echo "::error::Missing canary key secret for ${{ matrix.env }} — run scripts/provision-canary.ps1 and set repo secrets."
+            exit 1
+          fi
+
+          # A forbidden PHI field (email) on an otherwise-valid event MUST be rejected with 422.
+          payload='{"event":"page_viewed","distinct_id":"canary-probe","properties":{"normalized_route":"/canary","email":"canary@example.com"}}'
+
+          code=$(curl -s -o /tmp/body.json -w "%{http_code}" \
+            -X POST "${BASE_URL}/api/ingest/events" \
+            -H "X-Observability-Key: ${CANARY_KEY}" \
+            -H "Content-Type: application/json" \
+            --data "${payload}")
+
+          echo "HTTP ${code} from ${BASE_URL}"
+          cat /tmp/body.json || true
+          echo
+
+          if [ "${code}" = "422" ]; then
+            echo "OK: allowlist rejected the forbidden field (${{ matrix.env }})."
+            exit 0
+          fi
+
+          echo "::error::Allowlist did NOT reject a forbidden PHI field on ${{ matrix.env }} (HTTP ${code}). Possible PHI leak."
+          exit 1
+
+      - name: Open issue on regression
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="[canary] PHI allowlist regression on ${{ matrix.env }}"
+          # Avoid duplicate spam: only file if no open issue with this title exists.
+          existing=$(gh issue list --state open --search "in:title $title" --json number --jq 'length')
+          if [ "${existing}" != "0" ]; then
+            echo "An open issue already tracks this regression; not filing a duplicate."
+            exit 0
+          fi
+          gh issue create \
+            --title "$title" \
+            --label "canary,security" \
+            --body "The PHI allowlist canary failed on **${{ matrix.env }}** (\`${{ matrix.base_url }}\`).
+
+          A known-forbidden field (\`email\`) was NOT rejected with 422 by \`/api/ingest/events\`. This may mean the allowlist regressed and PHI could be persisted. **Treat as a potential privacy incident.**
+
+          - Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Check \`PropertyAllowlistValidator\` / \`EventCatalog.ForbiddenProperties\` and recent deploys.
+          - Runbook context: docs/privacy-rules.md, docs/slo.md."

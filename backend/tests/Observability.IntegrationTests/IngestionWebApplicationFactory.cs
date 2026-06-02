@@ -9,7 +9,7 @@ using Observability.Infrastructure.Persistence;
 
 namespace Observability.IntegrationTests;
 
-public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Program>
+public class IngestionWebApplicationFactory : WebApplicationFactory<Program>
 {
     public Guid SeededAppId { get; } = Guid.NewGuid();
     public Guid SeededEnvId { get; } = Guid.NewGuid();
@@ -17,6 +17,11 @@ public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Progr
     public string ServerKeyPlaintext { get; } = "aoserv_test_server_key_xxxxxxxxxxxxxxxx";
     public string RevokedKeyPlaintext { get; } = "aoserv_revoked_key_xxxxxxxxxxxxxxxxxxxx";
     public string AdminKeyPlaintext { get; } = "test-admin-key-xxxxxxxxxxxxxxxxxxxx";
+
+    // Second tenant — used by the multi-tenant isolation regression tests (Issue 10.1).
+    public Guid SecondAppId { get; } = Guid.NewGuid();
+    public Guid SecondEnvId { get; } = Guid.NewGuid();
+    public string SecondServerKeyPlaintext { get; } = "aoserv_test_tenant_b_key_xxxxxxxxxxxx";
 
     private readonly string _dbName = $"obs-test-{Guid.NewGuid():N}";
     private int _seeded;
@@ -90,6 +95,30 @@ public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Progr
                 KeyType = ApiKeyType.ServerApi,
                 RevokedAt = DateTime.UtcNow.AddDays(-1),
             });
+
+        // Second tenant (App B) — its own app, environment, and server key. Lets the isolation
+        // tests prove tenant A's key can never write or read tenant B's data (Issue 10.1).
+        db.Applications.Add(new Observability.Domain.Applications.Application
+        {
+            Id = SecondAppId,
+            Name = "Second App",
+            Slug = "second-app",
+        });
+
+        db.AppEnvironments.Add(new AppEnvironment
+        {
+            Id = SecondEnvId,
+            ApplicationId = SecondAppId,
+            EnvironmentName = "Production",
+        });
+
+        db.ApiKeys.Add(new ApiKey
+        {
+            ApplicationId = SecondAppId,
+            EnvironmentId = SecondEnvId,
+            KeyHash = hasher.Hash(SecondServerKeyPlaintext),
+            KeyType = ApiKeyType.ServerApi,
+        });
 
         await db.SaveChangesAsync();
     }
