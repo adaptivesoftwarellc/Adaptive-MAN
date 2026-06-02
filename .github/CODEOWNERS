@@ -1,0 +1,16 @@
+# CODEOWNERS — privacy/allowlist surfaces require named-reviewer approval (Issue 10.11).
+# Matching is last-match-wins; these are the most safety-critical files in the platform.
+# Enforcement requires branch protection on `main` with "Require review from Code Owners"
+# (manual repo-settings step — see Issue 10.11 / top-of-plan TODO).
+
+# Privacy rules + event catalog (the allowlist's human-readable contract)
+/docs/privacy-rules.md            @brandvdo @ArloK223 @ArloK62
+/docs/event-catalog.md            @brandvdo @ArloK223 @ArloK62
+
+# Server-side allowlist enforcement
+/backend/src/Observability.Application/Ingestion/PropertyAllowlistValidator.cs   @brandvdo @ArloK223 @ArloK62
+/backend/src/Observability.Application/Ingestion/**/*Allowlist*.cs               @brandvdo @ArloK223 @ArloK62
+
+# The PHI allowlist canary (Issue 10.2) and CODEOWNERS self-protection
+/.github/workflows/canary.yml     @brandvdo @ArloK223 @ArloK62
+/.github/CODEOWNERS               @brandvdo @ArloK223 @ArloK62
