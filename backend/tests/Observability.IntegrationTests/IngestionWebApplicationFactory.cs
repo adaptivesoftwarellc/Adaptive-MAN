@@ -9,7 +9,7 @@ using Observability.Infrastructure.Persistence;
 
 namespace Observability.IntegrationTests;
 
-public sealed class IngestionWebApplicationFactory : WebApplicationFactory<Program>
+public class IngestionWebApplicationFactory : WebApplicationFactory<Program>
 {
     public Guid SeededAppId { get; } = Guid.NewGuid();
     public Guid SeededEnvId { get; } = Guid.NewGuid();

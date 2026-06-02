@@ -15,6 +15,10 @@ builder.AddKeyVaultIfConfigured();
 builder.Services.AddObservabilityInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
+builder.Services.AddObservabilityRateLimiting(builder.Configuration);
+
+var maxIngestBodyBytes = builder.Configuration.GetValue<long?>("Observability:Ingest:MaxBodyBytes")
+    ?? IngestPayloadLimitMiddleware.DefaultMaxBodyBytes;
 
 builder.Services.Configure<JsonOptions>(opts =>
 {
@@ -40,6 +44,16 @@ app.ValidateRequiredSecrets();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 
+// UseRouting must run before UseRateLimiter so the limiter can read the endpoint's
+// RequireRateLimiting metadata; otherwise the policy is silently never applied.
+app.UseRouting();
+app.UseRateLimiter();
+
+// 64 KB ingest payload cap (Issue 8.8), scoped to the ingest surface only.
+app.UseWhen(
+    ctx => ctx.Request.Path.StartsWithSegments("/api/ingest"),
+    branch => branch.UseMiddleware<IngestPayloadLimitMiddleware>(maxIngestBodyBytes));
+
 // CORS for the dashboard during local dev. Phase 8 RBAC will gate dashboard endpoints; until then
 // the dashboard is open within the trusted network.
 if (app.Environment.IsDevelopment())
@@ -58,7 +72,7 @@ app.MapHealthEndpoints();
 app.MapDashboardEndpoints();
 app.MapAdminEndpoints();
 
-var ingest = app.MapGroup("/api/ingest").AddApiKeyAuth();
+var ingest = app.MapGroup("/api/ingest").AddApiKeyAuth().RequireRateLimiting(RateLimitingExtensions.IngestPolicy);
 ingest.MapIngestionEndpoints();
 ingest.MapSessionIngestEndpoints();
 app.MapSessionReadEndpoints();
