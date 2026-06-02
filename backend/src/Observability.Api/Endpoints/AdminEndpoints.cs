@@ -18,12 +18,15 @@ namespace Observability.Api.Endpoints;
 public static class AdminEndpoints
 {
     private const string ActorType = "admin_key";
+    private const int MaxPageSize = 200;
+    private const int DefaultPageSize = 50;
 
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
         var admin = app.MapGroup("/api/admin").AddAdminKeyAuth();
         admin.MapPost("/apps", CreateApp);
         admin.MapPost("/apps/{slug}/environments/{env}/keys", MintKey);
+        admin.MapGet("/audit", GetAudit);
     }
 
     public sealed record CreateAppRequest(string Name, string Slug, string? Description, string[]? Environments);
@@ -161,6 +164,87 @@ public static class AdminEndpoints
             plaintext_key = plaintext,
             note = "Store this immediately. The plaintext value is not retrievable after this response.",
         }, statusCode: 201);
+    }
+
+    /// <summary>
+    /// Issue 8.7 read-only audit view. Paginated, filterable list of <c>AuditLogs</c> rows for the
+    /// Phase 10.6 admin UI. Same admin-key gate as the write endpoints; pagination/range semantics
+    /// mirror <see cref="DashboardEndpoints"/> and the response envelope matches
+    /// <c>/api/dashboard/events</c>. Pure read — no rows written.
+    /// </summary>
+    private static async Task<IResult> GetAudit(
+        [FromQuery] string? action,
+        [FromQuery] string? app,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? page,
+        [FromQuery(Name = "page_size")] int? pageSize,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        var range = ResolveRange(from, to);
+        var (skip, take) = ResolvePaging(page, pageSize);
+
+        var q = db.AuditLogs.AsNoTracking()
+            .Where(a => a.OccurredAt >= range.From && a.OccurredAt < range.To);
+
+        if (!string.IsNullOrWhiteSpace(action))
+            q = q.Where(a => a.Action == action);
+
+        if (!string.IsNullOrWhiteSpace(app))
+        {
+            Guid? appId;
+            if (Guid.TryParse(app, out var parsedId))
+            {
+                appId = parsedId;
+            }
+            else
+            {
+                var slug = app.Trim().ToLowerInvariant();
+                appId = await db.Applications.AsNoTracking()
+                    .Where(a => a.Slug == slug)
+                    .Select(a => (Guid?)a.Id)
+                    .FirstOrDefaultAsync(ct);
+
+                // Unknown slug is a filter that matches nothing, not a 404.
+                if (appId is null)
+                    return Results.Ok(new { total = 0L, page = skip / take, page_size = take, rows = Array.Empty<object>() });
+            }
+            q = q.Where(a => a.ApplicationId == appId);
+        }
+
+        var total = await q.LongCountAsync(ct);
+        var rows = await q.OrderByDescending(a => a.OccurredAt)
+            .Skip(skip).Take(take)
+            .Select(a => new
+            {
+                id = a.Id,
+                occurred_at = a.OccurredAt,
+                action = a.Action,
+                actor_type = a.ActorType,
+                application_id = a.ApplicationId,
+                environment_id = a.EnvironmentId,
+                correlation_id = a.CorrelationId,
+                details_json = a.DetailsJson,
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { total, page = skip / take, page_size = take, rows });
+    }
+
+    private static (DateTime From, DateTime To) ResolveRange(DateTime? from, DateTime? to)
+    {
+        var resolvedTo = to ?? DateTime.UtcNow;
+        var resolvedFrom = from ?? resolvedTo.AddHours(-24);
+        if (resolvedFrom >= resolvedTo) resolvedFrom = resolvedTo.AddHours(-24);
+        return (DateTime.SpecifyKind(resolvedFrom, DateTimeKind.Utc), DateTime.SpecifyKind(resolvedTo, DateTimeKind.Utc));
+    }
+
+    private static (int Skip, int Take) ResolvePaging(int? page, int? pageSize)
+    {
+        var take = Math.Clamp(pageSize ?? DefaultPageSize, 1, MaxPageSize);
+        var p = Math.Max(page ?? 0, 0);
+        return (p * take, take);
     }
 
     private static Task WriteAuditAsync(

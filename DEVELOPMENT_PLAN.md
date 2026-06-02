@@ -709,9 +709,11 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 ### Issue 8.7 — Audit logging
 **Description:** Audit dashboard access, settings changes, API key create/revoke.
 **Acceptance criteria:**
-- [ ] `AuditLogs` table
-- [ ] All admin endpoints write audit rows
-- [ ] Read-only audit view
+- [x] `AuditLogs` table — shipped in 8.9 (`Phase8AdminAuditLog` migration).
+- [x] All admin endpoints write audit rows — both endpoints that exist today (`POST /api/admin/apps`, key mint) emit rows; no other admin-shaped endpoints exist (`AddAdminKeyAuth` is applied only to the `/api/admin` group). Key-revoke will add `admin.key.revoked` when that endpoint lands in 10.6.
+- [x] Read-only audit view — **backend done** (PR C, branch `phase-8/7-audit-logging-backend`): paginated, filterable `GET /api/admin/audit` (filters: `action`, `app` slug/id, `from`/`to`, `page`/`page_size`; `OccurredAt DESC`; admin-key gated; `{ total, page, page_size, rows }` envelope). **UI remains in 10.6** — the 10.6 admin audit-log page consumes this endpoint. See [`docs/work/pr-c-investigation.md`](docs/work/pr-c-investigation.md).
+
+**Retention:** audit rows are compliance-adjacent and retain longer than telemetry — proposed default **365 days**, configurable via `Observability:Retention:AuditLogDays`, enforced by the 8.5 retention job when it lands (which writes its own `admin.retention.swept` audit row per run). Documented in PR C; not enforced until 8.5.
 
 ### Issue 8.8 — Rate limiting + payload size limits
 **Description:** Per-key rate; reject oversized payloads at the edge.
