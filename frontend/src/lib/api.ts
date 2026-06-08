@@ -1,8 +1,60 @@
 // Frontend API client. Phase 8 will add auth headers; for now the dashboard runs against an
 // internal-only backend without auth.
 
-const RAW_BASE = ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_OBSERVABILITY_API_URL) ?? 'http://localhost:8080';
+import * as mock from './mock';
+
+const ENV = (import.meta as unknown as {
+  env?: { DEV?: boolean; VITE_OBSERVABILITY_API_URL?: string; VITE_USE_MOCKS?: string };
+}).env ?? {};
+
+const RAW_BASE = ENV.VITE_OBSERVABILITY_API_URL ?? 'http://localhost:8080';
 export const API_BASE = RAW_BASE.replace(/\/$/, '');
+
+// ---------------------------------------------------------------------------
+// Demo / mock mode
+//
+// Lets the dashboard render realistic sample reports when the backend or DB is empty.
+// In a production build, mocks are controlled ONLY by the build-time VITE_USE_MOCKS flag
+// (off unless explicitly built for a demo); the runtime localStorage toggle is ignored so a
+// stray key on a shared origin can never make a deployed dashboard serve fake data. In dev,
+// resolution order is: localStorage toggle > VITE_USE_MOCKS > default ON.
+// ---------------------------------------------------------------------------
+
+const MOCK_STORAGE_KEY = 'observability:mocks';
+
+function resolveMockMode(): boolean {
+  // Production: build-time flag only. localStorage must never enable mocks in a deployed build.
+  if (ENV.DEV !== true) {
+    return ENV.VITE_USE_MOCKS === 'true';
+  }
+  try {
+    const stored = localStorage.getItem(MOCK_STORAGE_KEY);
+    if (stored === 'on') return true;
+    if (stored === 'off') return false;
+  } catch {
+    /* ignore */
+  }
+  if (ENV.VITE_USE_MOCKS === 'true') return true;
+  if (ENV.VITE_USE_MOCKS === 'false') return false;
+  return true;
+}
+
+export const USE_MOCKS = resolveMockMode();
+
+/** Flip demo mode and reload so every query re-runs against the chosen source. */
+export function setMockMode(on: boolean): void {
+  try {
+    localStorage.setItem(MOCK_STORAGE_KEY, on ? 'on' : 'off');
+  } catch {
+    /* ignore */
+  }
+  location.reload();
+}
+
+/** Small artificial latency so loading skeletons are visible in demo mode. */
+function delay<T>(value: T, ms = 220): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
 
 export interface AppEnvironmentDto {
   id: string;
@@ -141,11 +193,30 @@ export class ApiError extends Error {
   }
 }
 
+// Abort a request that never responds so a hung/black-holed backend surfaces as an error
+// instead of an infinite loading spinner. status 0 marks "no HTTP response" (timeout/network).
+const REQUEST_TIMEOUT_MS = 15_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch (e) {
+    if (controller.signal.aborted) {
+      throw new ApiError(`Backend did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`, 0, null);
+    }
+    // fetch rejects with a TypeError when the backend is unreachable (connection refused,
+    // DNS failure, CORS). Wrap it so callers get a friendly message instead of "Failed to fetch".
+    throw new ApiError('Cannot reach the backend. Check that the API is running.', 0, e);
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     let body: unknown = null;
     try { body = await res.json(); } catch { /* ignore */ }
@@ -157,19 +228,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 type AnyQuery = Record<string, string | number | undefined>;
 
 export const api = {
-  apps: () => request<AppDto[]>('/api/apps'),
-  health: (q: DashboardQuery) => request<HealthDto>(`/api/dashboard/health${buildQuery(q as unknown as AnyQuery)}`),
-  errors: (q: DashboardQuery & PagingQuery & { sort?: string }) =>
-    request<PagedResult<ErrorRowDto>>(`/api/dashboard/errors${buildQuery(q as unknown as AnyQuery)}`),
+  apps: () =>
+    USE_MOCKS ? delay(mock.mockApps()) : request<AppDto[]>('/api/apps'),
+  health: (q: DashboardQuery) =>
+    USE_MOCKS
+      ? delay(mock.mockHealth(q))
+      : request<HealthDto>(`/api/dashboard/health${buildQuery(q as unknown as AnyQuery)}`),
+  errors: (q: DashboardQuery & PagingQuery & { sort?: string; category?: string }) =>
+    USE_MOCKS
+      ? delay(mock.mockErrors(q))
+      : request<PagedResult<ErrorRowDto>>(`/api/dashboard/errors${buildQuery(q as unknown as AnyQuery)}`),
   events: (q: DashboardQuery & PagingQuery & EventFilters) =>
-    request<PagedResult<EventRowDto>>(`/api/dashboard/events${buildQuery(q as unknown as AnyQuery)}`),
+    USE_MOCKS
+      ? delay(mock.mockEvents(q))
+      : request<PagedResult<EventRowDto>>(`/api/dashboard/events${buildQuery(q as unknown as AnyQuery)}`),
   sessions: (q: DashboardQuery & PagingQuery & { errors_only?: boolean }) =>
-    request<PagedResult<SessionRowDto>>(`/api/dashboard/sessions${buildQuery({
-      ...(q as unknown as AnyQuery),
-      errors_only: q.errors_only ? 'true' : undefined,
-    })}`),
+    USE_MOCKS
+      ? delay(mock.mockSessions(q))
+      : request<PagedResult<SessionRowDto>>(`/api/dashboard/sessions${buildQuery({
+          ...(q as unknown as AnyQuery),
+          errors_only: q.errors_only ? 'true' : undefined,
+        })}`),
   sessionTimeline: (sessionId: string) =>
-    request<TimelineDto>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
+    USE_MOCKS
+      ? delay(mock.mockTimeline(sessionId))
+      : request<TimelineDto>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
 };
 
 export interface DashboardQuery {
@@ -186,7 +269,7 @@ export interface EventFilters {
   correlation_id?: string;
 }
 
-function buildQuery(q: Record<string, string | number | undefined>): string {
+export function buildQuery(q: Record<string, string | number | undefined>): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(q)) {
     if (v === undefined || v === '' || v === null) continue;

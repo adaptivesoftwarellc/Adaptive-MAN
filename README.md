@@ -20,7 +20,7 @@ Health check: `GET http://localhost:8080/health`
 
 ```
 backend/   ASP.NET Core 8 solution (Api, Application, Domain, Infrastructure, Worker)
-frontend/  React + Vite + TS + Tailwind dashboard
+frontend/  React + Vite + TS + Tailwind dashboard (see frontend/README.md)
 packages/  observability-client-js, observability-client-dotnet (Phase 4)
 docs/      architecture, privacy, event catalog, identity, route normalization
 ```
@@ -37,3 +37,6 @@ docs/      architecture, privacy, event catalog, identity, route normalization
 ## Development
 
 See [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md). Phase 0 (foundation) and Phase 1 (backend ingestion MVP) are the current focus.
+
+The dashboard runs with built-in **demo data** by default in dev (no backend required) — see
+[frontend/README.md](frontend/README.md) for the mock-mode toggle and conventions.

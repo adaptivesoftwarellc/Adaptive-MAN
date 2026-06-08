@@ -1,34 +1,92 @@
 /**
- * Per-app dashboard presets — saved views that deep-link into Health/Errors/Events
+ * Dashboard views — saved shortcuts that deep-link into Health/Errors/Events/Sessions
  * with a curated app + env + range filter applied via the URL.
  *
- * Mirrors the original PostHog dashboard plan from SCH onboarding (Phase 6.9).
- * Add new entries here when onboarding additional apps; the Sidebar reads this
- * list directly so no other wiring is needed.
+ * Two sources:
+ *  - `builtin`  — curated "Quick views", shipped with the app (originally mirroring the SCH
+ *                 PostHog onboarding dashboards, Phase 6.9). Not user-editable.
+ *  - `user`     — "My views", created and removed by the user, persisted in localStorage.
+ *
+ * The Sidebar reads `builtinViews` plus `loadUserViews()` and renders them in their own
+ * sections, so adding richer editing later (rename, reorder, share) only touches this module.
  */
 
-export interface DashboardPreset {
+export type ViewSource = 'builtin' | 'user';
+export type ViewPage = 'health' | 'errors' | 'events' | 'sessions';
+export type ViewRange = '1h' | '24h' | '7d' | '30d' | 'custom';
+
+export interface DashboardView {
   id: string;
   label: string;
-  // The dashboard page this preset opens (matches the App.tsx route table).
-  page: 'health' | 'errors' | 'events' | 'sessions';
+  // The dashboard page this view opens (matches the App.tsx route table).
+  page: ViewPage;
   app: string;
   env: string;
-  range: '1h' | '24h' | '7d' | '30d';
+  range: ViewRange;
+  // Only meaningful when range === 'custom'.
+  from?: string;
+  to?: string;
+  source: ViewSource;
 }
 
-export const presets: DashboardPreset[] = [
-  // SCH onboarding presets — Phase 6.9
-  { id: 'sch-ui-prod-health',  label: 'SCH UI · Prod health',  page: 'health', app: 'sch-ui',  env: 'Production',  range: '24h' },
-  { id: 'sch-ui-dev-health',   label: 'SCH UI · Dev health',   page: 'health', app: 'sch-ui',  env: 'Development', range: '24h' },
-  { id: 'sch-api-prod-health', label: 'SCH API · Prod health', page: 'health', app: 'sch-api', env: 'Production',  range: '24h' },
-  { id: 'sch-api-dev-health',  label: 'SCH API · Dev health',  page: 'health', app: 'sch-api', env: 'Development', range: '24h' },
-  { id: 'sch-ui-errors',       label: 'SCH UI · Errors (7d)',  page: 'errors', app: 'sch-ui',  env: 'Production',  range: '7d'  },
-  { id: 'sch-api-errors',      label: 'SCH API · Errors (7d)', page: 'errors', app: 'sch-api', env: 'Production',  range: '7d'  },
+/** Curated, read-only shortcuts. */
+export const builtinViews: DashboardView[] = [
+  // SCH onboarding views — Phase 6.9
+  { id: 'sch-ui-prod-health',  label: 'SCH UI · Prod health',  page: 'health', app: 'sch-ui',  env: 'Production',  range: '24h', source: 'builtin' },
+  { id: 'sch-ui-dev-health',   label: 'SCH UI · Dev health',   page: 'health', app: 'sch-ui',  env: 'Development', range: '24h', source: 'builtin' },
+  { id: 'sch-api-prod-health', label: 'SCH API · Prod health', page: 'health', app: 'sch-api', env: 'Production',  range: '24h', source: 'builtin' },
+  { id: 'sch-api-dev-health',  label: 'SCH API · Dev health',  page: 'health', app: 'sch-api', env: 'Development', range: '24h', source: 'builtin' },
+  { id: 'sch-ui-errors',       label: 'SCH UI · Errors (7d)',  page: 'errors', app: 'sch-ui',  env: 'Production',  range: '7d',  source: 'builtin' },
+  { id: 'sch-api-errors',      label: 'SCH API · Errors (7d)', page: 'errors', app: 'sch-api', env: 'Production',  range: '7d',  source: 'builtin' },
 ];
 
-/** Build the relative URL for a preset including query params. */
-export function presetHref(p: DashboardPreset): string {
-  const params = new URLSearchParams({ app: p.app, env: p.env, range: p.range });
-  return `/${p.page}?${params.toString()}`;
+/** Build the relative URL for a view, including query params. */
+export function viewHref(v: DashboardView): string {
+  const params = new URLSearchParams({ app: v.app, env: v.env, range: v.range });
+  if (v.range === 'custom') {
+    if (v.from) params.set('from', v.from);
+    if (v.to) params.set('to', v.to);
+  }
+  return `/${v.page}?${params.toString()}`;
+}
+
+// ---------------------------------------------------------------------------
+// User views (localStorage-backed). The Sidebar mutates these via the helpers
+// below and re-reads loadUserViews() to refresh its list.
+// ---------------------------------------------------------------------------
+
+const USER_VIEWS_KEY = 'observability:user-views:v1';
+
+export function loadUserViews(): DashboardView[] {
+  try {
+    const raw = localStorage.getItem(USER_VIEWS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as DashboardView[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persist(views: DashboardView[]): void {
+  try {
+    localStorage.setItem(USER_VIEWS_KEY, JSON.stringify(views));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Append a user view and return the updated list. */
+export function addUserView(view: Omit<DashboardView, 'id' | 'source'>): DashboardView[] {
+  const id = `user-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+  const next = [...loadUserViews(), { ...view, id, source: 'user' as const }];
+  persist(next);
+  return next;
+}
+
+/** Remove a user view by id and return the updated list. */
+export function deleteUserView(id: string): DashboardView[] {
+  const next = loadUserViews().filter((v) => v.id !== id);
+  persist(next);
+  return next;
 }
