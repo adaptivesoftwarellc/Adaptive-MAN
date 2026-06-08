@@ -25,6 +25,19 @@ Failure responses are deliberately generic:
 - 401 `{"error":"unauthorized"}` — missing, invalid, revoked, or expired key
 - 403 `{"error":"forbidden"}` — public key hitting server-only endpoint
 
+## SDK version
+
+Header: `X-Observability-SDK-Version: <platform>/<semver>` (e.g. `js/0.2.0`, `dotnet/0.2.0`)
+
+- Sent by SDKs on every ingest request for wire-protocol version negotiation.
+- A bare semver (`0.2.0`) is also accepted.
+- Optional on inbound. A missing header is treated as `unknown` and logged at `Information` (kept
+  below `Warning` so a not-yet-upgraded fleet that omits the header doesn't flood logs). CORS
+  preflight (`OPTIONS`) requests are not evaluated.
+- The server **never rejects** on version grounds in the current protocol (v1). When a floor is
+  configured (`Observability:Sdk:MinVersion`, unset by default), requests below it are logged at
+  `Warning` but still accepted. Floor-based rejection becomes meaningful only with a v2 protocol.
+
 ## Correlation ID
 
 Header: `X-Correlation-Id: <ulid-or-uuid>`
@@ -33,7 +46,30 @@ Header: `X-Correlation-Id: <ulid-or-uuid>`
 - Echoed back on the response.
 - Persisted on every `Events` and `Errors` row.
 
+## Route versioning & deprecation policy
+
+The ingestion wire protocol is versioned via the URL prefix and the SDK-version header above.
+
+### Route versioning
+
+- `/api/v1/ingest/*` and `/api/v1/sessions/{id}/timeline` are the versioned ingest surface.
+- The unprefixed paths (`/api/ingest/*`, `/api/sessions/{id}/timeline`) are **aliases** of `v1` —
+  same handlers, same auth and rate limiting — and remain supported for backwards compatibility with
+  already-deployed SDKs.
+- Dashboard (`/api/dashboard/*`, `/api/apps`) and admin (`/api/admin/*`) endpoints are **not** part
+  of the versioned SDK contract and evolve independently.
+
+### Support windows
+
+- **Unprefixed paths** are supported until SDK major version `1.0` ships, after which new SDK majors
+  target `/api/v1/` (or later) explicitly.
+- **N-1 minor** SDK versions are supported for **6 months** after the next minor lands.
+- Versioned routes are dropped only with a **major server release**, announced in advance.
+
 ## Endpoints
+
+> Every endpoint below is also reachable under the `/api/v1/` prefix (e.g. `POST /api/v1/ingest/events`).
+> The prefixed and unprefixed forms are identical in request shape, responses, and persistence.
 
 ### `POST /api/ingest/events`
 
