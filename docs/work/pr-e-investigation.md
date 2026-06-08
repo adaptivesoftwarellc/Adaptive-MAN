@@ -92,8 +92,14 @@ full extract. `to` defaults to now.
   column (`CreatedAt` / `LastSeenAt`) then `Id`. That ordering is aligned with the existing
   `(App, Env, CreatedAt)` / `(App, Env, LastSeenAt)` indexes (the clustered `Id` is the implicit
   trailing key), so SQL Server streams off the index instead of sorting the full result set to
-  tempdb — which matters precisely for the large-volume warehouse-feed case. `Id` tiebreak keeps
+  tempdb — which matters precisely for the large-volume warehouse-feed case (when `env` is supplied;
+  an `app`-only export still sorts, as no index leads with `App, CreatedAt`). `Id` tiebreak keeps
   ordering deterministic for resumable / idempotent imports.
+- **Command timeout vs. stream length** — the default 30s SqlClient command timeout is *cumulative
+  network-read time* across the open reader, so a dense 90-day window can exceed it mid-stream, and
+  `EnableRetryOnFailure` can't retry a partially-consumed stream. The export handlers set
+  `SetCommandTimeout(0)` (no timeout); the 90-day window bounds scope and a client disconnect
+  cancels via the request token, so we don't rely on the timeout to bound connection lifetime.
 - **Audit fidelity** — the audit row is written in a `finally` **after** the stream completes, so
   partial failures are still recorded. `DetailsJson` carries `count`, `from`, `to`, `status`
   (`completed` / `failed` / `canceled`), and the active filters. The audit `SaveChanges` uses
@@ -116,5 +122,3 @@ full extract. `to` defaults to now.
 - **Include `Id`?** — **yes.** Needed for idempotent re-imports and for chunked clients to
   resume / dedupe. Also serves as the deterministic tiebreak in the stream ordering
   (`CreatedAt`/`LastSeenAt`, then `Id`).
-</content>
-</invoke>

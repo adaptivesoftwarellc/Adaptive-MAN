@@ -25,6 +25,13 @@ public static class ExportEndpoints
     private static readonly TimeSpan MaxRange = TimeSpan.FromDays(90);
     private static readonly byte[] Newline = "\n"u8.ToArray();
 
+    // The default 30s SqlClient command timeout is cumulative network-read time across the open
+    // reader, so a dense 90-day window (millions of rows) can blow it mid-stream — and the retrying
+    // execution strategy can't retry a partially-consumed stream. That surfaces as a truncated HTTP
+    // 200 the consumer can't distinguish from a complete export. Disable the timeout for exports: the
+    // 90-day window bounds scope and client disconnect cancels via the request token (RequestAborted).
+    private const int ExportCommandTimeoutSeconds = 0;
+
     public static void MapExportEndpoints(this IEndpointRouteBuilder app)
     {
         var export = app.MapGroup("/api/admin/export").AddAdminKeyAuth();
@@ -51,6 +58,7 @@ public static class ExportEndpoints
         var failure = Validate(appId, format, from, to, out var range);
         if (failure is not null) return failure;
 
+        ConfigureExportTimeout(db);
         var q = db.Events.AsNoTracking()
             .Where(e => e.ApplicationId == appId && e.CreatedAt >= range.From && e.CreatedAt < range.To);
         if (envId is not null) q = q.Where(e => e.EnvironmentId == envId);
@@ -99,6 +107,7 @@ public static class ExportEndpoints
         var failure = Validate(appId, format, from, to, out var range);
         if (failure is not null) return failure;
 
+        ConfigureExportTimeout(db);
         var q = db.Errors.AsNoTracking()
             .Where(e => e.ApplicationId == appId && e.LastSeenAt >= range.From && e.LastSeenAt < range.To);
         if (envId is not null) q = q.Where(e => e.EnvironmentId == envId);
@@ -144,6 +153,7 @@ public static class ExportEndpoints
         var failure = Validate(appId, format, from, to, out var range);
         if (failure is not null) return failure;
 
+        ConfigureExportTimeout(db);
         var q = db.SafetyViolations.AsNoTracking()
             .Where(v => v.ApplicationId == appId && v.CreatedAt >= range.From && v.CreatedAt < range.To);
         if (envId is not null) q = q.Where(v => v.EnvironmentId == envId);
@@ -169,6 +179,13 @@ public static class ExportEndpoints
     /// <see cref="IResult"/> on failure, or <c>null</c> if the request is good to stream. Runs
     /// before any bytes are written so error bodies are clean JSON, not a broken NDJSON stream.
     /// </summary>
+    // Guarded so the relational-only SetCommandTimeout is a no-op under the InMemory test provider.
+    private static void ConfigureExportTimeout(ObservabilityDbContext db)
+    {
+        if (db.Database.IsRelational())
+            db.Database.SetCommandTimeout(ExportCommandTimeoutSeconds);
+    }
+
     private static IResult? Validate(Guid? appId, string? format, DateTime? from, DateTime? to,
         out (DateTime From, DateTime To) range)
     {
