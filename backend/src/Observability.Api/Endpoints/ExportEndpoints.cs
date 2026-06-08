@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using JsonOptions = Microsoft.AspNetCore.Http.Json.JsonOptions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Observability.Api.Middleware;
 using Observability.Domain.Audit;
@@ -43,6 +44,7 @@ public static class ExportEndpoints
         [FromQuery] string? format,
         ObservabilityDbContext db,
         HttpContext http,
+        IServiceScopeFactory scopeFactory,
         IOptions<JsonOptions> json,
         CancellationToken ct)
     {
@@ -56,7 +58,9 @@ public static class ExportEndpoints
         if (!string.IsNullOrWhiteSpace(distinctId)) q = q.Where(e => e.DistinctId == distinctId);
         if (!string.IsNullOrWhiteSpace(correlationId)) q = q.Where(e => e.CorrelationId == correlationId);
 
-        var rows = q.OrderBy(e => e.Id).Select(e => new
+        // Order by the range-filter column (+Id tiebreak): index-aligned, so SQL Server streams off
+        // the (App, Env, CreatedAt) index instead of sorting the whole result set to tempdb.
+        var rows = q.OrderBy(e => e.CreatedAt).ThenBy(e => e.Id).Select(e => new
         {
             id = e.Id,
             application_id = e.ApplicationId,
@@ -75,7 +79,7 @@ public static class ExportEndpoints
         }).AsAsyncEnumerable();
 
         var filters = new { event_name = eventName, distinct_id = distinctId, correlation_id = correlationId };
-        await StreamAsync(http, db, "admin.export.events", appId!.Value, envId, range, filters,
+        await StreamAsync(http, scopeFactory, "admin.export.events", appId!.Value, envId, range, filters,
             rows, json.Value.SerializerOptions, ct);
         return Results.Empty;
     }
@@ -88,6 +92,7 @@ public static class ExportEndpoints
         [FromQuery] string? format,
         ObservabilityDbContext db,
         HttpContext http,
+        IServiceScopeFactory scopeFactory,
         IOptions<JsonOptions> json,
         CancellationToken ct)
     {
@@ -98,7 +103,7 @@ public static class ExportEndpoints
             .Where(e => e.ApplicationId == appId && e.LastSeenAt >= range.From && e.LastSeenAt < range.To);
         if (envId is not null) q = q.Where(e => e.EnvironmentId == envId);
 
-        var rows = q.OrderBy(e => e.Id).Select(e => new
+        var rows = q.OrderBy(e => e.LastSeenAt).ThenBy(e => e.Id).Select(e => new
         {
             id = e.Id,
             application_id = e.ApplicationId,
@@ -119,7 +124,7 @@ public static class ExportEndpoints
             last_correlation_id = e.LastCorrelationId,
         }).AsAsyncEnumerable();
 
-        await StreamAsync(http, db, "admin.export.errors", appId!.Value, envId, range, new { },
+        await StreamAsync(http, scopeFactory, "admin.export.errors", appId!.Value, envId, range, new { },
             rows, json.Value.SerializerOptions, ct);
         return Results.Empty;
     }
@@ -132,6 +137,7 @@ public static class ExportEndpoints
         [FromQuery] string? format,
         ObservabilityDbContext db,
         HttpContext http,
+        IServiceScopeFactory scopeFactory,
         IOptions<JsonOptions> json,
         CancellationToken ct)
     {
@@ -142,7 +148,7 @@ public static class ExportEndpoints
             .Where(v => v.ApplicationId == appId && v.CreatedAt >= range.From && v.CreatedAt < range.To);
         if (envId is not null) q = q.Where(v => v.EnvironmentId == envId);
 
-        var rows = q.OrderBy(v => v.Id).Select(v => new
+        var rows = q.OrderBy(v => v.CreatedAt).ThenBy(v => v.Id).Select(v => new
         {
             id = v.Id,
             application_id = v.ApplicationId,
@@ -153,7 +159,7 @@ public static class ExportEndpoints
             created_at = v.CreatedAt,
         }).AsAsyncEnumerable();
 
-        await StreamAsync(http, db, "admin.export.safety_violations", appId!.Value, envId, range, new { },
+        await StreamAsync(http, scopeFactory, "admin.export.safety_violations", appId!.Value, envId, range, new { },
             rows, json.Value.SerializerOptions, ct);
         return Results.Empty;
     }
@@ -166,21 +172,33 @@ public static class ExportEndpoints
     private static IResult? Validate(Guid? appId, string? format, DateTime? from, DateTime? to,
         out (DateTime From, DateTime To) range)
     {
-        range = ResolveRange(from, to);
+        range = default;
 
         if (appId is null)
             return Results.BadRequest(new { error = "missing_filter", reason = "app is required for exports." });
 
+        // No implicit default window: a bulk export must name its range explicitly, so a caller
+        // feeding a warehouse can't silently get only the last 24h and think it's a full extract.
+        if (from is null)
+            return Results.BadRequest(new { error = "missing_filter", reason = "from is required for exports." });
+
         if (!string.IsNullOrWhiteSpace(format) && !string.Equals(format, "ndjson", StringComparison.OrdinalIgnoreCase))
             return Results.BadRequest(new { error = "unsupported_format", reason = "only 'ndjson' is supported." });
 
-        if (range.To - range.From > MaxRange)
+        var resolvedFrom = DateTime.SpecifyKind(from.Value, DateTimeKind.Utc);
+        var resolvedTo = DateTime.SpecifyKind(to ?? DateTime.UtcNow, DateTimeKind.Utc);
+
+        if (resolvedTo <= resolvedFrom)
+            return Results.BadRequest(new { error = "invalid_range", reason = "to must be after from." });
+
+        if (resolvedTo - resolvedFrom > MaxRange)
             return Results.BadRequest(new
             {
                 error = "range_too_large",
                 reason = "export range must be <= 90 days. Chunk the request into <=90-day windows.",
             });
 
+        range = (resolvedFrom, resolvedTo);
         return null;
     }
 
@@ -192,7 +210,7 @@ public static class ExportEndpoints
     /// </summary>
     private static async Task StreamAsync<T>(
         HttpContext http,
-        ObservabilityDbContext db,
+        IServiceScopeFactory scopeFactory,
         string action,
         Guid appId,
         Guid? envId,
@@ -230,7 +248,7 @@ public static class ExportEndpoints
         }
         finally
         {
-            await WriteAuditAsync(db, action, appId, envId, http, new
+            await WriteAuditAsync(scopeFactory, action, appId, envId, http, new
             {
                 count,
                 from = range.From,
@@ -243,7 +261,7 @@ public static class ExportEndpoints
     }
 
     private static async Task WriteAuditAsync(
-        ObservabilityDbContext db,
+        IServiceScopeFactory scopeFactory,
         string action,
         Guid? appId,
         Guid? envId,
@@ -252,6 +270,11 @@ public static class ExportEndpoints
     {
         try
         {
+            // Fresh scope + DbContext: the streaming query's DataReader may still be open on the
+            // request-scoped context (no MARS), so reusing it for the audit write would throw on the
+            // partial-failure path — the exact case the audit row needs to capture.
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
             db.AuditLogs.Add(new AuditLog
             {
                 Action = action,
@@ -269,13 +292,5 @@ public static class ExportEndpoints
             // Best-effort audit: a failed export should surface as the broken stream, not be masked
             // by a secondary failure writing its own audit trail.
         }
-    }
-
-    private static (DateTime From, DateTime To) ResolveRange(DateTime? from, DateTime? to)
-    {
-        var resolvedTo = to ?? DateTime.UtcNow;
-        var resolvedFrom = from ?? resolvedTo.AddHours(-24);
-        if (resolvedFrom >= resolvedTo) resolvedFrom = resolvedTo.AddHours(-24);
-        return (DateTime.SpecifyKind(resolvedFrom, DateTimeKind.Utc), DateTime.SpecifyKind(resolvedTo, DateTimeKind.Utc));
     }
 }

@@ -31,6 +31,9 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
         return client;
     }
 
+    // Exports now require an explicit `from`; a wide window covers anything seeded "recently".
+    private static string WideFrom => $"&from={Uri.EscapeDataString(DateTime.UtcNow.AddDays(-30).ToString("o"))}";
+
     private static async Task<List<JsonElement>> ParseNdjsonAsync(HttpResponseMessage resp)
     {
         var body = await resp.Content.ReadAsStringAsync();
@@ -84,6 +87,16 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
     }
 
     [Fact]
+    public async Task Export_MissingFrom_Returns400()
+    {
+        var client = AdminClient(_factory.AdminKeyPlaintext);
+        var resp = await client.GetAsync($"/api/admin/export/events?app={_factory.SeededAppId}");
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("missing_filter");
+    }
+
+    [Fact]
     public async Task Export_RangeOver90Days_Returns400()
     {
         var client = AdminClient(_factory.AdminKeyPlaintext);
@@ -113,7 +126,7 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
     public async Task Export_UnsupportedFormat_Returns400()
     {
         var client = AdminClient(_factory.AdminKeyPlaintext);
-        var resp = await client.GetAsync($"/api/admin/export/events?app={_factory.SeededAppId}&format=csv");
+        var resp = await client.GetAsync($"/api/admin/export/events?app={_factory.SeededAppId}{WideFrom}&format=csv");
         resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("error").GetString().Should().Be("unsupported_format");
@@ -160,7 +173,7 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
 
         var client = AdminClient(_factory.AdminKeyPlaintext);
         var resp = await client.GetAsync(
-            $"/api/admin/export/events?app={_factory.SeededAppId}&event_name={prefix}_1");
+            $"/api/admin/export/events?app={_factory.SeededAppId}{WideFrom}&event_name={prefix}_1");
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var lines = await ParseNdjsonAsync(resp);
@@ -176,7 +189,7 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
 
         var client = AdminClient(_factory.AdminKeyPlaintext);
         var resp = await client.GetAsync(
-            $"/api/admin/export/events?app={_factory.SeededAppId}&event_name={prefix}_0");
+            $"/api/admin/export/events?app={_factory.SeededAppId}{WideFrom}&event_name={prefix}_0");
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = await resp.Content.ReadAsStringAsync(); // drain the stream so the finally-block audit lands
 
@@ -195,16 +208,76 @@ public class ExportEndpointsTests : IClassFixture<IngestionWebApplicationFactory
     }
 
     [Fact]
-    public async Task Export_Errors_And_SafetyViolations_StreamNdjson()
+    public async Task Export_Errors_StreamsNdjson_RowCountAndContentMatchDb()
     {
-        var errorsResp = await AdminClient(_factory.AdminKeyPlaintext)
-            .GetAsync($"/api/admin/export/errors?app={_factory.SeededAppId}");
-        errorsResp.StatusCode.Should().Be(HttpStatusCode.OK);
-        errorsResp.Content.Headers.ContentType!.MediaType.Should().Be("application/x-ndjson");
+        var fpPrefix = $"errfp_{Guid.NewGuid():N}".Substring(0, 16);
+        var baseTime = DateTime.UtcNow.AddHours(-1);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+            db.Errors.AddRange(Enumerable.Range(0, 4).Select(i => new ErrorRecord
+            {
+                ApplicationId = _factory.SeededAppId,
+                EnvironmentId = _factory.SeededEnvId,
+                Fingerprint = $"{fpPrefix}_{i}",
+                ErrorType = "server_error",
+                OccurrenceCount = i + 1,
+                FirstSeenAt = baseTime,
+                LastSeenAt = baseTime.AddMinutes(i),
+            }));
+            await db.SaveChangesAsync();
+        }
 
-        var violationsResp = await AdminClient(_factory.AdminKeyPlaintext)
-            .GetAsync($"/api/admin/export/safety-violations?app={_factory.SeededAppId}");
-        violationsResp.StatusCode.Should().Be(HttpStatusCode.OK);
-        violationsResp.Content.Headers.ContentType!.MediaType.Should().Be("application/x-ndjson");
+        var resp = await AdminClient(_factory.AdminKeyPlaintext)
+            .GetAsync($"/api/admin/export/errors?app={_factory.SeededAppId}&env={_factory.SeededEnvId}{WideFrom}");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        resp.Content.Headers.ContentType!.MediaType.Should().Be("application/x-ndjson");
+
+        var mine = (await ParseNdjsonAsync(resp))
+            .Where(l => l.GetProperty("fingerprint").GetString()!.StartsWith(fpPrefix)).ToList();
+        mine.Should().HaveCount(4);
+        mine.Select(l => l.GetProperty("last_seen_at").GetDateTime()).Should().BeInAscendingOrder();
+        mine[0].GetProperty("error_type").GetString().Should().Be("server_error");
+
+        using var verify = _factory.Services.CreateScope();
+        var vdb = verify.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+        var dbCount = await vdb.Errors.CountAsync(e => e.Fingerprint.StartsWith(fpPrefix));
+        mine.Should().HaveCount(dbCount);
+    }
+
+    [Fact]
+    public async Task Export_SafetyViolations_StreamsNdjson_RowCountAndContentMatchDb()
+    {
+        var fieldPrefix = $"fld_{Guid.NewGuid():N}".Substring(0, 16);
+        var baseTime = DateTime.UtcNow.AddHours(-1);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+            db.SafetyViolations.AddRange(Enumerable.Range(0, 3).Select(i => new SafetyViolation
+            {
+                ApplicationId = _factory.SeededAppId,
+                EnvironmentId = _factory.SeededEnvId,
+                EventName = "page_viewed",
+                RejectedField = $"{fieldPrefix}_{i}",
+                Reason = "not_allowlisted",
+                CreatedAt = baseTime.AddMinutes(i),
+            }));
+            await db.SaveChangesAsync();
+        }
+
+        var resp = await AdminClient(_factory.AdminKeyPlaintext)
+            .GetAsync($"/api/admin/export/safety-violations?app={_factory.SeededAppId}&env={_factory.SeededEnvId}{WideFrom}");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        resp.Content.Headers.ContentType!.MediaType.Should().Be("application/x-ndjson");
+
+        var mine = (await ParseNdjsonAsync(resp))
+            .Where(l => l.GetProperty("rejected_field").GetString()!.StartsWith(fieldPrefix)).ToList();
+        mine.Should().HaveCount(3);
+        mine.Should().OnlyContain(l => l.GetProperty("reason").GetString() == "not_allowlisted");
+
+        using var verify = _factory.Services.CreateScope();
+        var vdb = verify.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+        var dbCount = await vdb.SafetyViolations.CountAsync(v => v.RejectedField.StartsWith(fieldPrefix));
+        mine.Should().HaveCount(dbCount);
     }
 }
