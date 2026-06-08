@@ -27,9 +27,9 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 | 4 — Client SDKs | **Done.** Both SDKs scaffolded + published. JS SDK auto-brackets sessions (4.11), SCH route-normalization audit landed (4.2), 4.7 closed won't-do, 4.8 handed to 8.2. **Published 2026-05-24:** `@adaptivesoftwarellc/observability-client-js@0.1.0` on npm, `AdaptiveSoftwareLLC.ObservabilityClient@0.1.2` on NuGet (initial `Adaptive.ObservabilityClient` id was reserved by another nuget account — renamed in `chore/rename-dotnet-pkg-id`; .NET namespace stays `Adaptive.ObservabilityClient` so consumer code is unaffected). Publish pipeline (`sdk-publish.yml`) is tag-triggered (`client-js-v*` / `client-dotnet-v*`) with workflow_dispatch dry-run fallback. Required secrets: `NPM_TOKEN` (granular token with `AdaptiveSoftwareLLC.*` glob + Bypass 2FA), `NUGET_API_KEY` (glob `AdaptiveSoftwareLLC.*`). |
 | 5 — Session Timeline | **Hardened.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`. SDK auto-bracket gap closed via Issue 4.11. **5.7 landed (2026-05-22):** full 8-cell benchmark grid run before/after on local Docker MSSQL; `Phase5HardeningIndexes` additive migration ships `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` + `Errors(ApplicationId, EnvironmentId, LastCorrelationId)`. p95 stays under 200ms through the 10k-events/session architecture-doc upper bound; 100k cell confirms the documented materialization boundary (see [`docs/perf.md`](docs/perf.md)). **4.11 live-ingest harness PASSED end-to-end against `obs-api-dev` (2026-05-22)** using a public key minted via the Phase 8.9 admin endpoints. Outstanding: 5.5 cross-process correlation verification owned by Phase 6.1; re-run grid against Azure SQL Dev (now unblocked — `ObservabilityDev` is live). |
 | 6 — SCH Onboarding | **Sessions A + B done; Session C (wall-clock soak + cutover) in flight.** Re-scoped 2026-04-30 (PostHog never merged; SCH onboards as a fresh integration). Soak shape (Option A, 2026-05-22): 5-business-day SCH Dev → `obs-api-dev` shakedown (no platform UAT env). **A: audits + publish pipeline shipped (2026-05-22).** **B: SDK integration merged (2026-05-24)** — SCH_UI on `feature/adaptive-observability` (analytics wrapper, routeUtils, RouteTracker, axios interceptor, identify on login, ErrorBoundary, `.env.example`, both Azure SWA workflows pass `VITE_OBSERVABILITY_*` + `VITE_RELEASE_SHA`, role-names audit doc); SCH_API on `feature/adaptive-observability` (`AddAdaptiveObservability(...)` DI, `AdaptiveObservability` config section, `GlobalExceptionMiddleware` emits `server_error_occurred` on 5xx, 8 BG services emit `background_job_failed`, dev-only test endpoints, `AnalyticsIdentity` helper). 6.9 dashboard preset merged (PR #15). 6.6 partly done (2026-05-25): app + env rows created via `scripts/onboard-sch.ps1`, 4 plaintext keys minted, ingestion smoke 4/4 green (sch-api + sch-ui Dev keys, events + errors paths, all 202 against `obs-api-dev`). **Session C remaining (as of 2026-05-25):** (a) Brandon sets four `AdaptiveObservability__*` App Service config values on the SCH_API Dev App Service (`ASPNETCORE_ENVIRONMENT=Dev` — not the literal "Development", so the App Service config path is the right one); (b) first real SCH-emitted event lands in `obs-api-dev` → Day 1 of the soak; (c) 5 business days zero `SafetyViolations` for `sch-ui` + `sch-api`; (d) 5.5 cross-process correlation trace (one request showing matching `correlation_id` on FE `api_request_failed` + BE `server_error_occurred`); (e) privacy reviewer sign-off committed in [`docs/migration/sch-dev-shakedown.md`](docs/migration/sch-dev-shakedown.md); (f) 6.8 Prod cutover after soak passes — Prod App Service config values wired by Brandon to `SHC-KV` or App Service config, Prod deploy with SDK, 1 week stable. **Adaptive-side blocker:** SCH_API Dev + Prod App Services aren't in `Adaptive Subscription` — Brandon owns the runtime config wiring. |
-| 7 — WMS Onboarding | Open. Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. |
+| 7 — WMS Onboarding | **Audits landed; integration open.** Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. 7.1 + 7.2 read-only audits shipped (`docs/audits/wmssite.md`, `wmsapi.md`); audit re-confirmed WMSAPI has no exception/correlation middleware (net-new infra) and that WMSAPI uses custom JWT (not MSAL — MSAL is WMSSite-only). 7.3–7.13 (decisions + integration) open. |
 | 8 – 9 | Open. Documented below. |
-| 10 — Platform Hardening (mission audit) | **Open. Added 2026-06-01.** 11 issues surfaced by re-reading the platform mission (custom PostHog replacement, multi-app, strict PHI/PII, anti-lock-in) against the rest of the plan. Four items (10.1 multi-tenant isolation test, 10.2 PHI allowlist canary, 10.3 self-monitoring/SLOs, 10.11 CODEOWNERS on privacy files) are flagged as **pre-6.8 cutover gates**. |
+| 10 — Platform Hardening (mission audit) | **In progress. Added 2026-06-01.** 11 issues surfaced by re-reading the platform mission (custom PostHog replacement, multi-app, strict PHI/PII, anti-lock-in). **Shipped:** 10.1/10.2/10.3 (code; post-merge ops pending), 10.11 (CODEOWNERS), **10.4 API versioning (#28), 10.5 bulk export (#29).** **Open:** 10.6 admin UI (needs 8.6 RBAC), 10.7 compliance/DR runbook (DR drill is a 6.8 prereq), 10.8 dogfood SDK, 10.9 migration playbook, 10.10 SDK failure-mode docs. Four items (10.1, 10.2, 10.3, 10.11) are **pre-6.8 cutover gates**. |
 
 ## Constraints
 
@@ -521,19 +521,21 @@ These differences from SCH (JS not TS, MSAL not custom JWT, no exception middlew
 
 ### Issue 7.1 — Audit WMSSite
 **Description:** Catalog routing, MSAL auth integration, Axios usage, existing error boundaries, env config, and PHI-sensitive routes.
+**Status:** **Done.** See [`docs/audits/wmssite.md`](docs/audits/wmssite.md) (read-only audit against `WMSSite@origin/dev` tip `b1793d9`; net-new instrumentation, not a cherry-pick — JS not TS, MSAL, no existing telemetry).
 **Acceptance criteria:**
-- [ ] `docs/audits/wmssite.md` complete
-- [ ] Lists existing React error boundaries (if any) — strategy decision feeds 7.8
-- [ ] Lists Axios instances — strategy decision feeds 7.5 (correlation-id forwarding)
-- [ ] Lists routes that must never emit `page_viewed` (PHI-bearing)
+- [x] `docs/audits/wmssite.md` complete
+- [x] Lists existing React error boundaries (if any) — strategy decision feeds 7.8
+- [x] Lists Axios instances — strategy decision feeds 7.5 (correlation-id forwarding)
+- [x] Lists routes that must never emit `page_viewed` (PHI-bearing)
 
 ### Issue 7.2 — Audit WMSAPI
 **Description:** Middleware pipeline, exception handling pattern (per-controller catches expected — no global middleware exists), all `IHostedService`/`BackgroundService` implementations, outbound HttpClient usage.
+**Status:** **Done.** See [`docs/audits/wmsapi.md`](docs/audits/wmsapi.md) (read-only audit against `WMSAPI@origin/dev` tip `ed42420`). Re-confirmed the plan's claims: no global exception middleware, no correlation-ID handling anywhere. **Correction surfaced:** WMSAPI uses custom symmetric-key JWT bearer, **not** MSAL — MSAL is WMSSite-only, so the API identity rule (7.4) resolves `distinct_id` from its own JWT claims like SCH_API. WMSAPI also lives on the `bdadaptivewoundmsllc` org (WMSSite is on `adaptivesoftwarellc`) — relevant for CI secret placement.
 **Acceptance criteria:**
-- [ ] `docs/audits/wmsapi.md` complete
-- [ ] Inventory of per-controller try/catch blocks (input to 7.6 reconciliation)
-- [ ] List of all BG services beyond `BackgroundProcessingService` (input to 7.7)
-- [ ] List of outbound HttpClient registrations (input to 7.5 propagation)
+- [x] `docs/audits/wmsapi.md` complete
+- [x] Inventory of per-controller try/catch blocks (input to 7.6 reconciliation)
+- [x] List of all BG services beyond `BackgroundProcessingService` (input to 7.7)
+- [x] List of outbound HttpClient registrations (input to 7.5 propagation)
 
 ### Issue 7.3 — JS-vs-TS SDK consumption strategy for WMSSite
 **Description:** WMSSite is JavaScript, so the SDK's compile-time event allowlist (TypeScript unions) is not enforced at host build time. Decide the developer-experience guarantee for event-name correctness. The server-side allowlist (Phase 1.4 + `SafetyViolations`) is the only safety net regardless of choice; this decision is about *catching typos earlier*.
@@ -860,8 +862,8 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 
 **Sequencing:**
 
-- **Pre-SCH-Prod-cutover gates (must land before 6.8):** 10.1, 10.2, 10.3, 10.11.
-- **Should land during 6.7 soak (parallel work):** 10.4, 10.5, 10.7.
+- **Pre-SCH-Prod-cutover gates (must land before 6.8):** 10.1, 10.2, 10.3, 10.11. *(code landed; post-merge ops outstanding)*
+- **Should land during 6.7 soak (parallel work):** ~~10.4~~ (shipped #28), ~~10.5~~ (shipped #29), 10.7.
 - **Can land post-cutover:** 10.6, 10.8, 10.9, 10.10.
 
 > **PR A2 (`phase-prod/cutover-gates`):** code for the pre-cutover gates **8.8 + 10.1 + 10.2 + 10.3** has landed (10.11 CODEOWNERS landed separately). Each issue section below records what shipped vs. what remains as **post-merge ops** (canary provisioning, Azure Monitor standup) or a **tracked follow-up** (dashboard auth → 8.6; ingest-latency metric). 6.8 stays blocked until those post-merge ops are complete.
@@ -937,32 +939,36 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Description:** SDKs hardcode `/api/ingest/events`. There is no `/v1/` prefix and no SDK-version header. When the wire protocol needs to change (a third required field, a property-shape change), every deployed SDK breaks simultaneously. Cheap to introduce versioning now; expensive to retrofit after multiple apps are in Prod.
 
 **Acceptance criteria:**
-- [ ] `/api/v1/ingest/events` + `/api/v1/ingest/errors` routes added, aliasing the existing paths (no behavioral change at first)
-- [ ] `/api/v1/ingest/sessions/start` + `/end` similarly aliased
-- [ ] SDK clients (both JS + .NET) send `X-Observability-SDK-Version: <semver>` header on every request
-- [ ] Backend logs a `Warning` when an SDK on a version older than a configurable floor connects; no rejection, just visibility
-- [ ] `docs/api-contract.md` documents version negotiation + deprecation policy (recommend: support N-1 minor for 6 months, drop with a major release)
-- [ ] SDKs continue to call unprefixed paths until next major SDK version to avoid breaking deployed consumers
+- [x] `/api/v1/ingest/events` + `/api/v1/ingest/errors` routes added, aliasing the existing paths (no behavioral change at first)
+- [x] `/api/v1/ingest/sessions/start` + `/end` similarly aliased
+- [x] SDK clients (both JS + .NET) send `X-Observability-SDK-Version: <semver>` header on every request
+- [x] Backend logs a `Warning` when an SDK on a version older than a configurable floor connects; no rejection, just visibility (missing header logged at `Information` to avoid flooding on the deployed v0.1.0 SCH SDK; `Warning` reserved for below-floor)
+- [x] `docs/api-contract.md` documents version negotiation + deprecation policy (N-1 minor for 6 months, drop with a major release)
+- [x] SDKs continue to call unprefixed paths until next major SDK version to avoid breaking deployed consumers
 
-**Investigation questions:**
-- Header vs. property: send SDK version in `X-Observability-SDK-Version` (clean) or as an event `_sdk_version` property (visible to allowlist)? Lean: header.
-- Should we reject SDKs below a floor, or just log? Lean: log indefinitely; reject only with a major-version drop.
+**Status:** ✅ Shipped in PR D (`phase-10/4-api-versioning`, merged #28). `/api/v1/ingest/*` + `/api/v1/sessions/{id}/timeline` mirror the unprefixed surface; `SdkVersionMiddleware` reads `X-Observability-SDK-Version` (platform-tagged value `js/<v>` / `dotnet/<v>`); `IngestPayloadLimitMiddleware` predicate widened to cover both prefixes; dev CORS allow-list extended. Floor config `Observability:Sdk:MinVersion` unset by default. See [`docs/work/pr-d-investigation.md`](docs/work/pr-d-investigation.md).
+
+**Investigation questions (resolved in PR D):**
+- ~~Header vs. property~~ — header (`X-Observability-SDK-Version`), platform-tagged (`js/<v>`, `dotnet/<v>`).
+- ~~Reject SDKs below a floor, or just log?~~ — log only in v1 (missing → `Information`, below-floor → `Warning`); floor-based rejection becomes meaningful only with a v2 wire protocol.
 
 ### Issue 10.5 — Bulk data export API
 
 **Description:** The pitch over PostHog was "we own our data." Today the only retrieval paths are paginated dashboard endpoints. No bulk export. If someone wants to feed a warehouse, run compliance analysis, or migrate off the platform later, they hit hand-written SQL or scraping.
 
 **Acceptance criteria:**
-- [ ] `GET /api/admin/export/events?app=&env=&from=&to=&format=ndjson` — streamed NDJSON response (chunked `Transfer-Encoding`, not buffered in memory)
-- [ ] Same shape for `/api/admin/export/errors` and `/api/admin/export/safety-violations`
-- [ ] Admin-key gated (`X-Observability-Admin-Key` — same gate as 8.9 admin endpoints; replaced by 8.6 RBAC when it lands)
-- [ ] One audit row per export (who, when, what filter, row count)
-- [ ] Reasonable cap on time-range per request (suggest: 90 days max — point to a future archive endpoint for older data)
-- [ ] Integration test: export of seeded data returns NDJSON whose row count matches the database
+- [x] `GET /api/admin/export/events?app=&env=&from=&to=&format=ndjson` — streamed NDJSON response (`IAsyncEnumerable` direct-to-body, not buffered in memory)
+- [x] Same shape for `/api/admin/export/errors` and `/api/admin/export/safety-violations`
+- [x] Admin-key gated (`X-Observability-Admin-Key` — same gate as 8.9 admin endpoints; replaced by 8.6 RBAC when it lands)
+- [x] One audit row per export (who, when, what filter, row count) — written in a `finally` after the stream, on a fresh `IServiceScopeFactory` scope with `CancellationToken.None` so a client disconnect can't drop it; `status` = `completed`/`failed`/`canceled`
+- [x] Reasonable cap on time-range per request — 90-day max (`> 90d` → `400 range_too_large`); `from` is required (no implicit default window), `to` defaults to now
+- [x] Integration test: export of seeded data returns NDJSON whose row count matches the database
 
-**Investigation questions:**
-- Format: NDJSON streamed (recommended), CSV (loses nested `properties_json`), Parquet (good for analytics, heavyweight dependency)?
-- Should `properties_json` be returned raw, unrolled, or both? Lean: raw, because that's what's stored.
+**Status:** ✅ Shipped in PR E (`phase-10/5-bulk-export`, merged #29). Streaming order aligned to the `(App, Env, CreatedAt/LastSeenAt)` indexes (then `Id` tiebreak) for index-driven streaming + idempotent re-import; `SetCommandTimeout(0)` so a dense 90-day window can't trip the cumulative SqlClient read timeout mid-stream; `app` required as defense-in-depth alongside 10.1. See [`docs/work/pr-e-investigation.md`](docs/work/pr-e-investigation.md).
+
+**Investigation questions (resolved in PR E):**
+- ~~Format~~ — NDJSON streamed. CSV loses nested `properties_json`; Parquet needs a heavyweight dependency. Both filed as possible follow-ups, not this PR.
+- ~~`properties_json` raw, unrolled, or both?~~ — raw (the stored string); unrolling is lossy and out of scope.
 
 ### Issue 10.6 — Self-service admin UI
 
