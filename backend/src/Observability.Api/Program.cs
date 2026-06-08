@@ -82,6 +82,7 @@ if (app.Environment.IsDevelopment())
 app.MapHealthEndpoints();
 app.MapDashboardEndpoints();
 app.MapAdminEndpoints();
+app.MapExportEndpoints();
 
 var ingest = app.MapGroup("/api/ingest").AddApiKeyAuth().RequireRateLimiting(RateLimitingExtensions.IngestPolicy);
 ingest.MapIngestionEndpoints();
