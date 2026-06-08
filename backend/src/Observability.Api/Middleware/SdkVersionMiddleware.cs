@@ -2,9 +2,10 @@ namespace Observability.Api.Middleware;
 
 /// <summary>
 /// Issue 10.4 — reads the <c>X-Observability-SDK-Version</c> header on ingest requests for
-/// wire-protocol version negotiation. Logs a <c>Warning</c> when the header is missing (the SDK
-/// version is treated as "unknown") or when it parses below a configured floor. It never rejects:
-/// floor enforcement only becomes meaningful with a v2 wire protocol, which is too early to enforce.
+/// wire-protocol version negotiation. Logs at <c>Information</c> when the header is missing (the SDK
+/// version is treated as "unknown") and at <c>Warning</c> when it parses below a configured floor.
+/// It never rejects: floor enforcement only becomes meaningful with a v2 wire protocol, which is too
+/// early to enforce.
 /// Scoped to the ingest surface (both unprefixed and <c>/api/v1</c>) via <c>UseWhen</c> in Program.cs.
 /// </summary>
 public sealed class SdkVersionMiddleware
