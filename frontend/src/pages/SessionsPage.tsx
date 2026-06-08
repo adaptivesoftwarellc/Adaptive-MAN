@@ -33,6 +33,15 @@ export function SessionsPage() {
       }),
   });
 
+  if (!ready) {
+    return (
+      <div className="p-6">
+        <PageHeader title="Sessions" description="User sessions and their lifecycle for the selected window." />
+        <EmptyState icon={<ClockIcon className="h-5 w-5" />} title="No app selected" description="Pick an app and environment above." />
+      </div>
+    );
+  }
+
   return (
     <div className="p-6">
       <PageHeader title="Sessions" description="User sessions and their lifecycle for the selected window." />

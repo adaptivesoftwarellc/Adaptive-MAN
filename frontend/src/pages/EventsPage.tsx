@@ -108,14 +108,14 @@ export function EventsPage() {
                 </td>
               </tr>
             )}
-            {data?.rows.length === 0 && (
+            {!isError && data?.rows.length === 0 && (
               <tr>
                 <td colSpan={6}>
                   <EmptyState icon={<InboxIcon className="h-5 w-5" />} title="No events match" description="Try clearing the filters above." />
                 </td>
               </tr>
             )}
-            {data?.rows.map((r) => (
+            {!isError && data?.rows.map((r) => (
               <tr key={r.id} className="cursor-pointer transition hover:bg-slate-50" onClick={() => setSelected(r)}>
                 <Td className="whitespace-nowrap text-slate-500">{new Date(r.created_at).toLocaleString()}</Td>
                 <Td>

@@ -14,14 +14,19 @@ export const API_BASE = RAW_BASE.replace(/\/$/, '');
 // Demo / mock mode
 //
 // Lets the dashboard render realistic sample reports when the backend or DB is empty.
-// Resolution order: explicit localStorage toggle > VITE_USE_MOCKS env var > default.
-// Default is ON in dev (`npm run dev`) and OFF in a production build, so a deployed
-// dashboard always hits the real API while local UI work gets demo data for free.
+// In a production build, mocks are controlled ONLY by the build-time VITE_USE_MOCKS flag
+// (off unless explicitly built for a demo); the runtime localStorage toggle is ignored so a
+// stray key on a shared origin can never make a deployed dashboard serve fake data. In dev,
+// resolution order is: localStorage toggle > VITE_USE_MOCKS > default ON.
 // ---------------------------------------------------------------------------
 
 const MOCK_STORAGE_KEY = 'observability:mocks';
 
 function resolveMockMode(): boolean {
+  // Production: build-time flag only. localStorage must never enable mocks in a deployed build.
+  if (ENV.DEV !== true) {
+    return ENV.VITE_USE_MOCKS === 'true';
+  }
   try {
     const stored = localStorage.getItem(MOCK_STORAGE_KEY);
     if (stored === 'on') return true;
@@ -31,7 +36,7 @@ function resolveMockMode(): boolean {
   }
   if (ENV.VITE_USE_MOCKS === 'true') return true;
   if (ENV.VITE_USE_MOCKS === 'false') return false;
-  return ENV.DEV === true;
+  return true;
 }
 
 export const USE_MOCKS = resolveMockMode();

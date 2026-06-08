@@ -102,14 +102,14 @@ export function ErrorsPage() {
                 </td>
               </tr>
             )}
-            {data?.rows.length === 0 && (
+            {!isError && data?.rows.length === 0 && (
               <tr>
                 <td colSpan={6}>
                   <EmptyState icon={<AlertTriangleIcon className="h-5 w-5" />} title="No errors in range" description="Nothing broke in this window — nice." />
                 </td>
               </tr>
             )}
-            {data?.rows.map((r) => (
+            {!isError && data?.rows.map((r) => (
               <tr key={r.id} className="cursor-pointer transition hover:bg-slate-50" onClick={() => setSelected(r)}>
                 <Td>
                   <div className="flex flex-col gap-0.5">
