@@ -11,6 +11,8 @@
  * — modern browsers complete the request after navigation just like sendBeacon would.
  */
 
+import { SDK_VERSION_HEADER, sdkVersionHeaderValue } from "./version.js";
+
 interface BracketConfig {
   ingestUrl: string;
   apiKey: string;
@@ -50,6 +52,7 @@ async function fireFetch(url: string, apiKey: string, body: string, debug: boole
       headers: {
         "Content-Type": "application/json",
         "X-Observability-Key": apiKey,
+        [SDK_VERSION_HEADER]: sdkVersionHeaderValue(),
       },
       body,
       credentials: "omit",

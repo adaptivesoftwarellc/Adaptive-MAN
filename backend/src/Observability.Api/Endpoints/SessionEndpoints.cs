@@ -30,6 +30,8 @@ public static class SessionEndpoints
     public static void MapSessionReadEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/sessions/{sessionId}/timeline", GetTimeline);
+        // Issue 10.4 — /api/v1 mirror; same handler, unprefixed path kept as a backwards-compatible alias.
+        app.MapGet("/api/v1/sessions/{sessionId}/timeline", GetTimeline);
     }
 
     private static async Task<IResult> HandleStart(

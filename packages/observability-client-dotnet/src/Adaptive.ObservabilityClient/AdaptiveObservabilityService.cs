@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading.Channels;
 using Adaptive.ObservabilityClient.Internal;
@@ -15,6 +16,15 @@ namespace Adaptive.ObservabilityClient;
 public sealed class AdaptiveObservabilityService : IAnalyticsService, IAsyncDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    // Issue 10.4 — sent on every ingest request for wire-protocol version negotiation. Platform-tagged
+    // per docs/api-contract.md (e.g. "dotnet/0.2.0"). Read once from the assembly's informational version.
+    internal const string SdkVersionHeaderName = "X-Observability-SDK-Version";
+    private static readonly string SdkVersionHeaderValue =
+        "dotnet/" + (typeof(AdaptiveObservabilityService).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(AdaptiveObservabilityService).Assembly.GetName().Version?.ToString()
+            ?? "unknown");
 
     private readonly AdaptiveObservabilityOptions _options;
     private readonly HttpClient _http;
@@ -47,6 +57,10 @@ public sealed class AdaptiveObservabilityService : IAnalyticsService, IAsyncDisp
         if (!string.IsNullOrEmpty(_options.ApiKey) && !_http.DefaultRequestHeaders.Contains("X-Observability-Key"))
         {
             _http.DefaultRequestHeaders.Add("X-Observability-Key", _options.ApiKey);
+        }
+        if (!_http.DefaultRequestHeaders.Contains(SdkVersionHeaderName))
+        {
+            _http.DefaultRequestHeaders.Add(SdkVersionHeaderName, SdkVersionHeaderValue);
         }
 
         _drainTask = _options.Enabled ? Task.Run(() => DrainAsync(_cts.Token)) : Task.CompletedTask;

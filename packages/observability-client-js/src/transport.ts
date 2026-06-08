@@ -3,6 +3,8 @@
  * with jitter. Errors swallowed silently per Phase 4.5.
  */
 
+import { SDK_VERSION_HEADER, sdkVersionHeaderValue } from "./version.js";
+
 export type Endpoint = "events" | "errors";
 
 export type Envelope =
@@ -87,6 +89,7 @@ export class Transport {
         headers: {
           "Content-Type": "application/json",
           "X-Observability-Key": this.config.apiKey,
+          [SDK_VERSION_HEADER]: sdkVersionHeaderValue(),
         },
         body,
         credentials: "omit",
