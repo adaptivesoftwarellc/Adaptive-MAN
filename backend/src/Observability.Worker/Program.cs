@@ -10,5 +10,9 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddObservabilityInfrastructure(builder.Configuration);
 builder.Services.AddHostedService<RetentionSweepService>();
 
+// Phase 8.3 — alert rule engine. Evaluates AlertRules on an interval and persists fired alerts
+// (visibility-only until 8.4 notifications land).
+builder.Services.AddHostedService<AlertEvaluationService>();
+
 var host = builder.Build();
 await host.RunAsync();

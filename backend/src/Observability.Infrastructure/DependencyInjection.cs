@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Observability.Application.Alerting;
 using Observability.Application.Ingestion;
 using Observability.Application.Retention;
 using Observability.Infrastructure.Authentication;
@@ -43,6 +44,10 @@ public static class DependencyInjection
 
         services.Configure<RetentionOptions>(configuration.GetSection(RetentionOptions.SectionName));
         services.AddScoped<IRetentionSweeper, RetentionSweeper>();
+
+        // Issue 8.3 — alert rule engine. Visibility-only (persists fired alerts) until 8.4 notifications.
+        services.Configure<AlertEvaluatorOptions>(configuration.GetSection(AlertEvaluatorOptions.SectionName));
+        services.AddScoped<IAlertEvaluator, AlertEvaluator>();
         services.AddSingleton<IPropertyAllowlistValidator, PropertyAllowlistValidator>();
         services.AddScoped<IIngestionService, IngestionService>();
 

@@ -150,6 +150,34 @@ The first `Admin` is seeded from `Observability:Bootstrap:*` config when the `Us
 API keys (`X-Observability-Key`) remain ingest-only and are unchanged by this work; the ingestion
 write-path was already tenant-scoped from the resolved key.
 
+## Alerting (Issue 8.3)
+
+A rule engine evaluates operator-authored `AlertRules` against telemetry and persists matches to
+`FiredAlerts`. It runs in the Worker as a `BackgroundService` (`AlertEvaluationService`) on a fixed
+interval (`Observability:Alerting:EvaluationIntervalSeconds`, default 60s), opening a DI scope per
+pass; the evaluation itself is the scoped `IAlertEvaluator` so it can be invoked directly in tests
+(mirrors the retention sweeper).
+
+**Visibility-only.** Notifications (email/Teams) are deferred to 8.4, which is gated on the
+ACS-vs-SendGrid decision and a Brandon-adjacent webhook/ACS resource. Until then the engine only
+writes `FiredAlerts` rows for the dashboard to surface — it delivers nothing externally. The schema
+(rule + fired-alert tables) and the per-rule evaluators are the durable part; 8.4 adds a delivery
+sink over the persisted alerts without changing rule evaluation.
+
+**Rule types** (each rule is scoped to an app and optionally a single environment; null = all envs):
+- `CountOverWindow` — events (optionally a named event) in the window ≥ threshold.
+- `NewErrorAfterRelease` — a fingerprint first seen in the window carrying a `ReleaseSha`; fires once
+  per new `(fingerprint, release)`.
+- `ErrorRateAboveThreshold` — active error fingerprints as a percentage of events in the window ≥
+  threshold; skipped when there is no event traffic to rate. Approximation suited to visibility-only
+  alerting, not an exact per-occurrence rate.
+- `AnyProdJobFailure` — any `BackgroundJobFailure` seen in the window in a `Production` environment.
+
+**Dedup.** Each candidate carries a `DedupKey`; a row is written only when no prior `FiredAlert` for
+the same `(rule, dedup key)` exists inside the rule's window. This keeps a standing condition from
+re-firing on every pass while still letting a genuinely new occurrence (new fingerprint, new release)
+fire.
+
 ## Open architectural questions
 
 - **Ingestion queue** — in-process `Channel<T>` for MVP (Phase 1), Service Bus when RPS warrants (Phase 8.9).
