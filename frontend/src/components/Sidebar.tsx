@@ -34,6 +34,7 @@ const links: { to: string; label: string; icon: ReactNode; adminOnly?: boolean }
   { to: '/events', label: 'Events', icon: <ListIcon /> },
   { to: '/sessions', label: 'Sessions', icon: <ClockIcon /> },
   { to: '/admin/apps', label: 'Apps', icon: <GridIcon />, adminOnly: true },
+  { to: '/admin/audit', label: 'Audit log', icon: <ListIcon />, adminOnly: true },
 ];
 
 const COLLAPSE_KEY = 'observability:sidebar-collapsed';

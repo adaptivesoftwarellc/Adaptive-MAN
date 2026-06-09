@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Observability.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Observability.Infrastructure.Persistence;
 namespace Observability.Infrastructure.Migrations
 {
     [DbContext(typeof(ObservabilityDbContext))]
-    partial class ObservabilityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260609153310_Phase10ApiKeyLastUsed")]
+    partial class Phase10ApiKeyLastUsed
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

@@ -25,8 +25,11 @@ public static class AdminEndpoints
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
         var admin = app.MapGroup("/api/admin").AddAdminAuth();
+        admin.MapGet("/apps", ListApps);
         admin.MapPost("/apps", CreateApp);
+        admin.MapGet("/apps/{slug}/environments/{env}/keys", ListKeys);
         admin.MapPost("/apps/{slug}/environments/{env}/keys", MintKey);
+        admin.MapPost("/apps/{slug}/environments/{env}/keys/{id:guid}/revoke", RevokeKey);
         admin.MapGet("/audit", GetAudit);
         admin.MapPost("/fingerprints/backfill", BackfillFingerprints);
 
@@ -34,6 +37,43 @@ public static class AdminEndpoints
         admin.MapGet("/users", ListUsers);
         admin.MapPost("/users", CreateUser);
         admin.MapPost("/users/{id:guid}/applications", AssignApplication);
+    }
+
+    /// <summary>
+    /// Issue 10.6 admin inventory. Lists every app with its environments and per-environment key counts
+    /// (active vs total) so the admin Apps page can show onboarding state at a glance. Unlike the
+    /// reader-scoped <c>/api/apps</c>, this is the full Admin view — no canary hiding, no app-scope filter.
+    /// </summary>
+    private static async Task<IResult> ListApps(ObservabilityDbContext db, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        var apps = await db.Applications.AsNoTracking()
+            .OrderBy(a => a.Name)
+            .Select(a => new
+            {
+                id = a.Id,
+                slug = a.Slug,
+                name = a.Name,
+                description = a.Description,
+                is_active = a.IsActive,
+                environments = a.Environments
+                    .OrderBy(e => e.EnvironmentName)
+                    .Select(e => new
+                    {
+                        id = e.Id,
+                        name = e.EnvironmentName,
+                        is_active = e.IsActive,
+                        total_key_count = db.ApiKeys.Count(k => k.EnvironmentId == e.Id),
+                        active_key_count = db.ApiKeys.Count(k =>
+                            k.EnvironmentId == e.Id
+                            && k.RevokedAt == null
+                            && (k.ExpiresAt == null || k.ExpiresAt > now)),
+                    })
+                    .ToList(),
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { apps });
     }
 
     public sealed record CreateAppRequest(string Name, string Slug, string? Description, string[]? Environments);
@@ -171,6 +211,85 @@ public static class AdminEndpoints
             plaintext_key = plaintext,
             note = "Store this immediately. The plaintext value is not retrievable after this response.",
         }, statusCode: 201);
+    }
+
+    /// <summary>
+    /// Issue 10.6 — keys for one app+environment. Read-only: the plaintext is gone after minting, so this
+    /// returns the row id (used for revoke), type, created / last-used / revoked timestamps and an
+    /// is_active flag. The UI masks the id for display.
+    /// </summary>
+    private static async Task<IResult> ListKeys(
+        string slug,
+        string env,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        var normalizedSlug = slug.Trim().ToLowerInvariant();
+        var environment = await db.AppEnvironments.AsNoTracking()
+            .Where(e => e.Application!.Slug == normalizedSlug && e.EnvironmentName == env)
+            .Select(e => new { e.Id })
+            .FirstOrDefaultAsync(ct);
+        if (environment is null)
+            return Results.NotFound(new { error = "not_found", reason = "app or environment not found." });
+
+        var now = DateTime.UtcNow;
+        var keys = await db.ApiKeys.AsNoTracking()
+            .Where(k => k.EnvironmentId == environment.Id)
+            .OrderByDescending(k => k.CreatedAt)
+            .Select(k => new
+            {
+                id = k.Id,
+                key_type = k.KeyType == ApiKeyType.PublicClient ? "PublicClient" : "ServerApi",
+                created_at = k.CreatedAt,
+                last_used_at = k.LastUsedAt,
+                expires_at = k.ExpiresAt,
+                revoked_at = k.RevokedAt,
+                is_active = k.RevokedAt == null && (k.ExpiresAt == null || k.ExpiresAt > now),
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { keys });
+    }
+
+    /// <summary>
+    /// Issue 10.6 — revoke a key. Idempotent: revoking an already-revoked key is a no-op that returns the
+    /// existing revoked time. Writes an <c>admin.key.revoked</c> audit row (closes the 8.7 note). After
+    /// this, <see cref="Observability.Infrastructure.Authentication.ApiKeyResolver"/> rejects the key.
+    /// </summary>
+    private static async Task<IResult> RevokeKey(
+        string slug,
+        string env,
+        Guid id,
+        ObservabilityDbContext db,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var normalizedSlug = slug.Trim().ToLowerInvariant();
+        var environment = await db.AppEnvironments.AsNoTracking()
+            .Where(e => e.Application!.Slug == normalizedSlug && e.EnvironmentName == env)
+            .Select(e => new { e.Id })
+            .FirstOrDefaultAsync(ct);
+        if (environment is null)
+            return Results.NotFound(new { error = "not_found", reason = "app or environment not found." });
+
+        var key = await db.ApiKeys
+            .FirstOrDefaultAsync(k => k.Id == id && k.EnvironmentId == environment.Id, ct);
+        if (key is null)
+            return Results.NotFound(new { error = "not_found", reason = "key not found for that app and environment." });
+
+        var alreadyRevoked = key.RevokedAt is not null;
+        if (!alreadyRevoked)
+        {
+            key.RevokedAt = DateTime.UtcNow;
+            await WriteAuditAsync(db, "admin.key.revoked", key.ApplicationId, key.EnvironmentId, http, new
+            {
+                key_id = key.Id,
+                key_type = key.KeyType.ToString(),
+            }, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return Results.Ok(new { id = key.Id, revoked_at = key.RevokedAt, already_revoked = alreadyRevoked });
     }
 
     public sealed record BackfillFingerprintsRequest(int? BatchSize);

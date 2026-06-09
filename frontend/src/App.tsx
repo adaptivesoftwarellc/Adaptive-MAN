@@ -9,6 +9,8 @@ import { EventsPage } from './pages/EventsPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SessionTimelinePage } from './pages/SessionTimelinePage';
 import { AdminAppsPage } from './pages/AdminAppsPage';
+import { AdminKeysPage } from './pages/AdminKeysPage';
+import { AdminAuditPage } from './pages/AdminAuditPage';
 import { LoginPage } from './pages/LoginPage';
 import { useAuth } from './lib/AuthContext';
 
@@ -69,6 +71,22 @@ export default function App() {
           element={
             <RequireAdmin>
               <AdminAppsPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="admin/keys/:slug/:env"
+          element={
+            <RequireAdmin>
+              <AdminKeysPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="admin/audit"
+          element={
+            <RequireAdmin>
+              <AdminAuditPage />
             </RequireAdmin>
           }
         />
