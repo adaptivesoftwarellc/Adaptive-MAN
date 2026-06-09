@@ -99,6 +99,25 @@ moves a row onto a fingerprint another row already owns, it **merges** them — 
 occurrence history is lost. The operation is idempotent and writes an `admin.fingerprint.backfilled`
 audit row.
 
+## Retention (Issue 8.5)
+
+Telemetry is swept on a schedule by the `Observability.Worker` host (`RetentionSweepService`), which
+runs once daily at `Observability:Retention:DailyRunAtUtc` (default `03:00` UTC). The sweep logic is a
+scoped service, `IRetentionSweeper`, shared with the API's DI container so behavior is identical
+wherever it runs and it can be exercised directly in tests.
+
+Each run, per environment:
+- `Events` older than `EventRetentionDays` (by `CreatedAt`) are deleted — per-env override, else the
+  90-day default from `RetentionOptions`.
+- `Errors` older than `ErrorRetentionDays` (by `LastSeenAt`) are deleted — per-env override, else 180.
+
+Globally, `AuditLogs` older than `AuditLogRetentionDays` (365, enforcing the 8.7/PR C policy) are
+deleted, except the sweep's own `admin.retention.swept` rows. `AppEnvironment.ReplayRetentionDays`
+is reserved for Phase 9 replay and not yet enforced. Every run writes one `admin.retention.swept`
+audit row (actor `system`) with the deletion counts. Deletes run in capped batches (load + remove)
+rather than `ExecuteDelete` so the nightly trickle stays within bounded transactions and the path
+works under the InMemory provider the tests use.
+
 ## Open architectural questions
 
 - **Ingestion queue** — in-process `Channel<T>` for MVP (Phase 1), Service Bus when RPS warrants (Phase 8.9).

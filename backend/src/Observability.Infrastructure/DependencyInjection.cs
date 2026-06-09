@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Observability.Application.Ingestion;
+using Observability.Application.Retention;
 using Observability.Infrastructure.Authentication;
 using Observability.Infrastructure.Persistence;
 
@@ -27,6 +28,9 @@ public static class DependencyInjection
         services.AddScoped<IApiKeyResolver, ApiKeyResolver>();
         services.AddScoped<IIngestionStore, IngestionStore>();
         services.AddScoped<IErrorFingerprintBackfiller, ErrorFingerprintBackfiller>();
+
+        services.Configure<RetentionOptions>(configuration.GetSection(RetentionOptions.SectionName));
+        services.AddScoped<IRetentionSweeper, RetentionSweeper>();
         services.AddSingleton<IPropertyAllowlistValidator, PropertyAllowlistValidator>();
         services.AddScoped<IIngestionService, IngestionService>();
 
