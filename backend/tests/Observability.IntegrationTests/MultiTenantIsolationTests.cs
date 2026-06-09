@@ -99,11 +99,10 @@ public class MultiTenantIsolationTests : IClassFixture<IngestionWebApplicationFa
         row.EnvironmentId.Should().Be(_factory.SecondEnvId);
     }
 
-    // 2. KNOWN GAP — 8.6 RBAC must close. Dashboard reads accept ?app= unauthenticated, so
-    //    tenant A's key (ignored by the read path) can read tenant B's events. Asserting the
-    //    current leaky behavior; flip to 403/empty when 8.6 lands.
+    // 2. Issue 8.6 (was KNOWN_GAP) — dashboard reads now require auth and are tenant-scoped. An
+    //    AppOwner of tenant A requesting tenant B's events is forbidden, not leaked.
     [Fact]
-    public async Task Dashboard_Events_WithCrossTenantAppParam_CurrentlyLeaksTenantBData_KNOWN_GAP_8_6()
+    public async Task Dashboard_Events_CrossTenant_AppOwner_Returns403()
     {
         // Seed an event under tenant B via B's own key.
         var distinct = $"isolation-dash-{Guid.NewGuid():N}";
@@ -116,23 +115,17 @@ public class MultiTenantIsolationTests : IClassFixture<IngestionWebApplicationFa
         });
         seed.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        // Tenant A's key on the dashboard request — but the dashboard ignores the key entirely.
-        var tenantA = AuthClient(_factory.ServerKeyPlaintext);
-        var res = await tenantA.GetAsync(
+        // AppOwner scoped to tenant A asks for tenant B's data → 403 before any query runs.
+        var owner = await _factory.BearerClientAsync(_factory.AppOwnerEmail, _factory.AppOwnerPassword);
+        var res = await owner.GetAsync(
             $"/api/dashboard/events?app={_factory.SecondAppId}&env={_factory.SecondEnvId}&distinct_id={distinct}");
-        res.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var total = doc.RootElement.GetProperty("total").GetInt64();
-
-        // KNOWN GAP (Issue 8.6): cross-tenant read is currently possible. When RBAC lands this
-        // request must return 403 or an empty result; update this assertion at that point.
-        total.Should().BeGreaterThan(0, "PRE-8.6 behavior: dashboard reads are unauthenticated and leak across tenants");
+        res.StatusCode.Should().Be(HttpStatusCode.Forbidden, "8.6: AppOwner cannot read other tenants' apps");
     }
 
-    // 3a. KNOWN GAP — 8.6. Same leak on /api/dashboard/errors.
+    // 3a. Issue 8.6 — same scoping on /api/dashboard/errors.
     [Fact]
-    public async Task Dashboard_Errors_WithCrossTenantAppParam_CurrentlyLeaksTenantBData_KNOWN_GAP_8_6()
+    public async Task Dashboard_Errors_CrossTenant_AppOwner_Returns403()
     {
         var tenantB = AuthClient(_factory.SecondServerKeyPlaintext);
         var seed = await tenantB.PostAsJsonAsync("/api/ingest/errors", new
@@ -144,21 +137,16 @@ public class MultiTenantIsolationTests : IClassFixture<IngestionWebApplicationFa
         });
         seed.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        var tenantA = AuthClient(_factory.ServerKeyPlaintext);
-        var res = await tenantA.GetAsync($"/api/dashboard/errors?app={_factory.SecondAppId}&env={_factory.SecondEnvId}");
-        res.StatusCode.Should().Be(HttpStatusCode.OK);
+        var owner = await _factory.BearerClientAsync(_factory.AppOwnerEmail, _factory.AppOwnerPassword);
+        var res = await owner.GetAsync($"/api/dashboard/errors?app={_factory.SecondAppId}&env={_factory.SecondEnvId}");
 
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var total = doc.RootElement.GetProperty("total").GetInt64();
-
-        // KNOWN GAP (Issue 8.6): must become 403/empty under RBAC.
-        total.Should().BeGreaterThan(0, "PRE-8.6 behavior: dashboard error reads leak across tenants");
+        res.StatusCode.Should().Be(HttpStatusCode.Forbidden, "8.6: AppOwner cannot read other tenants' apps");
     }
 
-    // 3b. KNOWN GAP — 8.6. The session timeline endpoint takes no app param and no auth, so a
-    //     session created under tenant B is readable by anyone who knows the session id.
+    // 3b. Issue 8.6 — the timeline read is now authenticated. An unauthenticated client gets 401, and
+    //     an AppOwner of tenant A cannot read a tenant B session (404 — existence is not confirmed).
     [Fact]
-    public async Task Timeline_ForTenantBSession_CurrentlyReadableWithoutTenantBKey_KNOWN_GAP_8_6()
+    public async Task Timeline_ForTenantBSession_IsTenantScoped()
     {
         var sid = $"isolation-session-{Guid.NewGuid():N}";
         var tenantB = AuthClient(_factory.SecondServerKeyPlaintext);
@@ -169,14 +157,38 @@ public class MultiTenantIsolationTests : IClassFixture<IngestionWebApplicationFa
         });
         start.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        // No tenant B key here — an unauthenticated client reads B's session timeline.
+        // Unauthenticated → 401.
         var anonymous = _factory.CreateClient();
-        var res = await anonymous.GetAsync($"/api/sessions/{sid}/timeline");
+        (await anonymous.GetAsync($"/api/sessions/{sid}/timeline")).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized, "8.6: timeline reads require authentication");
 
-        // KNOWN GAP (Issue 8.6): the timeline read should be tenant-scoped. Today it is not.
-        res.StatusCode.Should().Be(HttpStatusCode.OK, "PRE-8.6 behavior: timeline reads are unauthenticated and not tenant-scoped");
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("session").GetProperty("application_id").GetGuid()
-            .Should().Be(_factory.SecondAppId);
+        // AppOwner of tenant A → 404 (not authorized to see this tenant B session).
+        var owner = await _factory.BearerClientAsync(_factory.AppOwnerEmail, _factory.AppOwnerPassword);
+        (await owner.GetAsync($"/api/sessions/{sid}/timeline")).StatusCode
+            .Should().Be(HttpStatusCode.NotFound, "8.6: AppOwner cannot read another tenant's session");
+    }
+
+    // 4. Issue 8.6 — an AppOwner CAN read its own app (positive control for the scoping above).
+    [Fact]
+    public async Task Dashboard_Events_OwnApp_AppOwner_Returns200()
+    {
+        var owner = await _factory.BearerClientAsync(_factory.AppOwnerEmail, _factory.AppOwnerPassword);
+        var res = await owner.GetAsync($"/api/dashboard/events?app={_factory.SeededAppId}&env={_factory.SeededEnvId}");
+        res.StatusCode.Should().Be(HttpStatusCode.OK, "8.6: AppOwner reads its own assigned app");
+    }
+
+    // 5. Issue 8.6 — a global-read Admin may read any tenant, and that access is audited.
+    [Fact]
+    public async Task Dashboard_AdminReadsAnyTenant_AndAccessIsAudited()
+    {
+        var admin = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
+        var res = await admin.GetAsync($"/api/dashboard/errors?app={_factory.SecondAppId}&env={_factory.SecondEnvId}");
+        res.StatusCode.Should().Be(HttpStatusCode.OK, "8.6: Admin is a global reader");
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+        (await db.AuditLogs.AsNoTracking()
+            .AnyAsync(a => a.Action == "access.dashboard" && a.ApplicationId == _factory.SecondAppId))
+            .Should().BeTrue("8.6 acceptance: Admin/Developer access is logged");
     }
 }

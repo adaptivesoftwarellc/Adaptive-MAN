@@ -81,7 +81,9 @@ public class ApiVersioningTests : IClassFixture<IngestionWebApplicationFactory>
         });
         start.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        var timeline = await client.GetAsync($"/api/v1/sessions/{sessionId}/timeline");
+        // Timeline reads require an authenticated user as of Issue 8.6 (API keys are ingest-only).
+        var dashboard = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
+        var timeline = await dashboard.GetAsync($"/api/v1/sessions/{sessionId}/timeline");
         timeline.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 

@@ -5,7 +5,9 @@ using Microsoft.EntityFrameworkCore;
 using Observability.Api.Configuration;
 using Observability.Api.Endpoints;
 using Observability.Api.Middleware;
+using Observability.Domain.Identity;
 using Observability.Infrastructure;
+using Observability.Infrastructure.Authentication;
 using Observability.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -43,6 +45,11 @@ app.ValidateRequiredSecrets();
     {
         await db.Database.MigrateAsync();
     }
+
+    // Issue 8.6 — bootstrap the first Admin user from config when the Users table is empty, so a fresh
+    // deployment has a way in without hand-seeded SQL. No-op unless Bootstrap:AdminEmail is set.
+    await BootstrapAdminUser.SeedIfConfiguredAsync(
+        db, scope.ServiceProvider.GetRequiredService<IPasswordHasher>(), app.Configuration, app.Logger);
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
@@ -73,13 +80,14 @@ if (app.Environment.IsDevelopment())
     {
         ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
         ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-Observability-Key, X-Correlation-Id, X-Observability-SDK-Version";
+        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Observability-Key, X-Observability-Admin-Key, X-Correlation-Id, X-Observability-SDK-Version";
         if (HttpMethods.IsOptions(ctx.Request.Method)) { ctx.Response.StatusCode = 204; return; }
         await next();
     });
 }
 
 app.MapHealthEndpoints();
+app.MapAuthEndpoints();
 app.MapDashboardEndpoints();
 app.MapAdminEndpoints();
 app.MapExportEndpoints();

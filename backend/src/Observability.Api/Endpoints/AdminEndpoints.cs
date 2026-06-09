@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Observability.Api.Middleware;
 using Observability.Application.Ingestion;
 using Observability.Domain.Applications;
-using Observability.Domain.Audit;
+using Observability.Domain.Identity;
 using Observability.Infrastructure.Authentication;
 using Observability.Infrastructure.Persistence;
 using DomainApplication = Observability.Domain.Applications.Application;
@@ -13,22 +13,27 @@ namespace Observability.Api.Endpoints;
 
 /// <summary>
 /// Phase 8.9 admin provisioning. Removes the hand-seeded SQL dependency for onboarding new apps and
-/// minting API keys. Gated by a static admin key (KV secret <c>ObservabilityAdminKey</c>) until
-/// Phase 8.6 RBAC lands; the endpoint shape stays stable across that swap.
+/// minting API keys. As of Issue 8.6 RBAC the surface is gated by <c>AddAdminAuth</c> — an Admin-role
+/// bearer token, or the static admin key (KV secret <c>ObservabilityAdminKey</c>) as a
+/// break-glass/bootstrap path for provisioning the first admin user.
 /// </summary>
 public static class AdminEndpoints
 {
-    private const string ActorType = "admin_key";
     private const int MaxPageSize = 200;
     private const int DefaultPageSize = 50;
 
     public static void MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").AddAdminKeyAuth();
+        var admin = app.MapGroup("/api/admin").AddAdminAuth();
         admin.MapPost("/apps", CreateApp);
         admin.MapPost("/apps/{slug}/environments/{env}/keys", MintKey);
         admin.MapGet("/audit", GetAudit);
         admin.MapPost("/fingerprints/backfill", BackfillFingerprints);
+
+        // Issue 8.6 — user administration. Provisioning the first admin uses the break-glass admin key.
+        admin.MapGet("/users", ListUsers);
+        admin.MapPost("/users", CreateUser);
+        admin.MapPost("/users/{id:guid}/applications", AssignApplication);
     }
 
     public sealed record CreateAppRequest(string Name, string Slug, string? Description, string[]? Environments);
@@ -147,7 +152,7 @@ public static class AdminEndpoints
             EnvironmentId = environment.Id,
             KeyHash = hasher.Hash(plaintext),
             KeyType = keyType.Value,
-            CreatedByUserId = ActorType,
+            CreatedByUserId = http.GetAuditActor()?.Email ?? "admin_key",
         };
         db.ApiKeys.Add(key);
 
@@ -269,6 +274,114 @@ public static class AdminEndpoints
         return Results.Ok(new { total, page = skip / take, page_size = take, rows });
     }
 
+    private static async Task<IResult> ListUsers(ObservabilityDbContext db, CancellationToken ct)
+    {
+        var users = await db.Users.AsNoTracking()
+            .OrderBy(u => u.Email)
+            .Select(u => new
+            {
+                id = u.Id,
+                email = u.Email,
+                display_name = u.DisplayName,
+                role = u.Role.ToString(),
+                is_active = u.IsActive,
+                created_at = u.CreatedAt,
+                last_login_at = u.LastLoginAt,
+                owned_application_ids = u.ApplicationAssignments.Select(a => a.ApplicationId).ToArray(),
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { users });
+    }
+
+    public sealed record CreateUserRequest(string? Email, string? DisplayName, string? Password, string? Role);
+
+    private static async Task<IResult> CreateUser(
+        [FromBody] CreateUserRequest? req,
+        ObservabilityDbContext db,
+        IPasswordHasher hasher,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (req is null || string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
+            return Results.BadRequest(new { error = "invalid_request", reason = "email and password are required." });
+
+        if (!TryParseRole(req.Role, out var role))
+            return Results.BadRequest(new { error = "invalid_request", reason = "role must be one of: viewer, developer, app_owner, admin." });
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        if (await db.Users.AnyAsync(u => u.Email == email, ct))
+            return Results.Conflict(new { error = "conflict", reason = "a user with that email already exists." });
+
+        var user = new User
+        {
+            Email = email,
+            DisplayName = string.IsNullOrWhiteSpace(req.DisplayName) ? email : req.DisplayName.Trim(),
+            PasswordHash = hasher.Hash(req.Password),
+            Role = role,
+        };
+        db.Users.Add(user);
+
+        await WriteAuditAsync(db, "admin.user.created", null, null, http, new
+        {
+            user_id = user.Id,
+            email = user.Email,
+            role = role.ToString(),
+        }, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Json(new { id = user.Id, email = user.Email, role = role.ToString() }, statusCode: 201);
+    }
+
+    public sealed record AssignApplicationRequest(Guid? ApplicationId);
+
+    /// <summary>Grants an AppOwner read access to one application (Issue 8.6 scoping).</summary>
+    private static async Task<IResult> AssignApplication(
+        Guid id,
+        [FromBody] AssignApplicationRequest? req,
+        ObservabilityDbContext db,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        if (req?.ApplicationId is not { } appId)
+            return Results.BadRequest(new { error = "invalid_request", reason = "application_id is required." });
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null)
+            return Results.NotFound(new { error = "not_found", reason = "user not found." });
+
+        if (!await db.Applications.AnyAsync(a => a.Id == appId, ct))
+            return Results.NotFound(new { error = "not_found", reason = "application not found." });
+
+        var exists = await db.UserApplicationAssignments
+            .AnyAsync(a => a.UserId == id && a.ApplicationId == appId, ct);
+        if (!exists)
+        {
+            db.UserApplicationAssignments.Add(new UserApplicationAssignment { UserId = id, ApplicationId = appId });
+            await WriteAuditAsync(db, "admin.user.assignment.added", appId, null, http, new
+            {
+                user_id = id,
+                application_id = appId,
+            }, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return Results.Ok(new { user_id = id, application_id = appId, created = !exists });
+    }
+
+    private static bool TryParseRole(string? value, out Role role)
+    {
+        role = default;
+        switch ((value ?? string.Empty).Trim().ToLowerInvariant())
+        {
+            case "viewer": role = Role.Viewer; return true;
+            case "developer": role = Role.Developer; return true;
+            case "app_owner" or "appowner": role = Role.AppOwner; return true;
+            case "admin": role = Role.Admin; return true;
+            default: return false;
+        }
+    }
+
     private static (DateTime From, DateTime To) ResolveRange(DateTime? from, DateTime? to)
     {
         var resolvedTo = to ?? DateTime.UtcNow;
@@ -293,15 +406,7 @@ public static class AdminEndpoints
         object details,
         CancellationToken ct)
     {
-        db.AuditLogs.Add(new AuditLog
-        {
-            Action = action,
-            ActorType = ActorType,
-            ApplicationId = appId,
-            EnvironmentId = envId,
-            CorrelationId = http.Response.Headers[CorrelationIdMiddleware.HeaderName].ToString(),
-            DetailsJson = JsonSerializer.Serialize(details),
-        });
+        AuditWriter.Add(db, http, action, appId, envId, details);
         return Task.CompletedTask;
     }
 }

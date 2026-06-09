@@ -30,9 +30,9 @@ flowchart TD
 
 ## Dashboard path
 
-1. React app authenticates (Phase 8 RBAC; placeholder login for MVP).
+1. React app authenticates against `/api/auth/login`, stores the bearer token, and sends it on every request (RBAC; Issue 8.6).
 2. Filter bar selects `Application` + `AppEnvironment` + date range.
-3. Pages call `/api/dashboard/*` and `/api/sessions/*` server-side queries.
+3. Pages call `/api/dashboard/*` and `/api/sessions/*` server-side queries — authenticated and tenant-scoped (see RBAC below).
 4. Recharts renders sparklines. CSV export available on event explorer.
 
 ## Onboarding path
@@ -117,6 +117,38 @@ is reserved for Phase 9 replay and not yet enforced. Every run writes one `admin
 audit row (actor `system`) with the deletion counts. Deletes run in capped batches (load + remove)
 rather than `ExecuteDelete` so the nightly trickle stays within bounded transactions and the path
 works under the InMemory provider the tests use.
+
+## RBAC & identity (Issue 8.6)
+
+**Decision (2026-06-08): identity source is local users**, not Entra/AAD. Rationale: the RBAC work
+was scoped to be implementable without Azure-admin access, and an Entra integration needs an app
+registration + tenant config that sits outside that boundary (and is hard to dogfood/test locally).
+Local users keep the phase shippable and unblock the self-service admin UI (10.6). The choice is
+reversible — identity resolution sits behind the `IUserAuthenticator` seam, so an Entra adapter can
+validate an AAD JWT and map group claims to roles later **without touching roles or enforcement**.
+
+**Roles.** `Admin`, `Developer`, `Viewer`, `AppOwner`.
+- Read scope: `Admin`/`Developer`/`Viewer` are global readers (every app); `AppOwner` is limited to
+  apps assigned in `UserApplicationAssignments`.
+- Only `Admin` may use the admin/provisioning surface.
+- `Admin`/`Developer` reads are audited (`access.dashboard` / `access.timeline`).
+
+**Authentication.** `POST /api/auth/login` verifies a PBKDF2 (`PasswordHasher`) credential and issues
+an HMAC-SHA256 bearer token (`AccessTokenService`) signed with `Observability:JwtSigningKey` — a
+self-contained, JWT-shaped token (`header.payload.signature`, base64url) chosen over a JWT NuGet
+package to avoid a new dependency, mirroring the hand-rolled `ApiKeyHasher`. The token carries
+`sub`/`email`/`role`/`exp`; owned-app assignments are resolved from the DB on each request so
+deactivation and role changes take effect immediately rather than at token expiry.
+
+**Enforcement.** `AddRequireUser` gates `/api/dashboard/*` and `/api/sessions/{id}/timeline`;
+`AddAdminAuth` gates `/api/admin/*` on the `Admin` role, with the static admin key
+(`X-Observability-Admin-Key`) retained as a break-glass/bootstrap path so the first admin user can be
+provisioned. App-scope is enforced once per dashboard request from the `?app=` param (AppOwner → 403);
+the timeline scopes on the session's owning app (cross-tenant → 404, so existence isn't confirmed).
+The first `Admin` is seeded from `Observability:Bootstrap:*` config when the `Users` table is empty.
+
+API keys (`X-Observability-Key`) remain ingest-only and are unchanged by this work; the ingestion
+write-path was already tenant-scoped from the resolved key.
 
 ## Open architectural questions
 

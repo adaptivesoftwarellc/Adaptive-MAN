@@ -1,7 +1,8 @@
-// Frontend API client. Phase 8 will add auth headers; for now the dashboard runs against an
-// internal-only backend without auth.
+// Frontend API client. As of Issue 8.6 (RBAC) live requests carry a bearer token and a 401 drops the
+// session. Mock/demo mode still runs entirely client-side with no backend or auth.
 
 import * as mock from './mock';
+import { getToken, notifyUnauthorized, type AuthUser } from './auth';
 
 const ENV = (import.meta as unknown as {
   env?: { DEV?: boolean; VITE_OBSERVABILITY_API_URL?: string; VITE_USE_MOCKS?: string };
@@ -213,12 +214,17 @@ const REQUEST_TIMEOUT_MS = 15_000;
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const token = getToken();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
       signal: controller.signal,
-      headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+      headers: {
+        Accept: 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init?.headers ?? {}),
+      },
     });
   } catch (e) {
     if (controller.signal.aborted) {
@@ -231,6 +237,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     clearTimeout(timer);
   }
   if (!res.ok) {
+    // A 401 on any endpoint other than the login attempt itself means the session is gone/expired —
+    // drop it so the app routes back to the login screen.
+    if (res.status === 401 && !path.startsWith('/api/auth/login')) {
+      notifyUnauthorized();
+    }
     let body: unknown = null;
     try { body = await res.json(); } catch { /* ignore */ }
     throw new ApiError(`Request failed: ${res.status}`, res.status, body);
@@ -238,9 +249,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface LoginResponse {
+  token: string;
+  expires_at: string;
+  user: AuthUser;
+}
+
 type AnyQuery = Record<string, string | number | undefined>;
 
 export const api = {
+  login: (email: string, password: string) =>
+    request<LoginResponse>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    }),
   apps: () =>
     USE_MOCKS ? delay(mock.mockApps()) : request<AppDto[]>('/api/apps'),
   health: (q: DashboardQuery) =>
