@@ -109,6 +109,19 @@ export interface ErrorRowDto {
   last_correlation_id: string | null;
 }
 
+export interface BackgroundJobRowDto {
+  id: number;
+  job_name: string;
+  error_type: string;
+  fingerprint: string;
+  release_sha: string | null;
+  occurrence_count: number;
+  suppressed_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  last_suppressed_at: string | null;
+}
+
 export interface EventRowDto {
   id: number;
   event_name: string;
@@ -238,6 +251,10 @@ export const api = {
     USE_MOCKS
       ? delay(mock.mockErrors(q))
       : request<PagedResult<ErrorRowDto>>(`/api/dashboard/errors${buildQuery(q as unknown as AnyQuery)}`),
+  backgroundJobs: (q: DashboardQuery & PagingQuery) =>
+    USE_MOCKS
+      ? delay(mock.mockBackgroundJobs(q))
+      : request<PagedResult<BackgroundJobRowDto>>(`/api/dashboard/background-jobs${buildQuery(q as unknown as AnyQuery)}`),
   events: (q: DashboardQuery & PagingQuery & EventFilters) =>
     USE_MOCKS
       ? delay(mock.mockEvents(q))

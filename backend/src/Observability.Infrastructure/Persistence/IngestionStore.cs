@@ -70,6 +70,7 @@ public sealed class IngestionStore : IIngestionStore
             if (failure.LastSeenAt - existing.LastSeenAt < dedupWindow)
             {
                 existing.LastSuppressedAt = failure.LastSeenAt;
+                existing.SuppressedCount++;
             }
             existing.LastSeenAt = failure.LastSeenAt;
             if (!string.IsNullOrEmpty(failure.ReleaseSha))
@@ -79,6 +80,17 @@ public sealed class IngestionStore : IIngestionStore
         }
 
         await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<TimeSpan> ResolveBackgroundJobDedupWindowAsync(Guid applicationId, Guid environmentId, TimeSpan defaultWindow, CancellationToken ct)
+    {
+        var overrideMinutes = await _db.AppEnvironments
+            .AsNoTracking()
+            .Where(e => e.Id == environmentId && e.ApplicationId == applicationId)
+            .Select(e => e.BackgroundJobDedupWindowMinutes)
+            .FirstOrDefaultAsync(ct);
+
+        return overrideMinutes is > 0 ? TimeSpan.FromMinutes(overrideMinutes.Value) : defaultWindow;
     }
 
     public async Task UpsertSessionStartAsync(Session session, CancellationToken ct)

@@ -168,7 +168,9 @@ public sealed class IngestionService : IIngestionService
                 FirstSeenAt = record.FirstSeenAt,
                 LastSeenAt = record.LastSeenAt,
             };
-            await _store.UpsertBackgroundJobFailureAsync(bgFailure, BackgroundJobDedupWindow, ct);
+            var dedupWindow = await _store.ResolveBackgroundJobDedupWindowAsync(
+                context.ApplicationId, context.EnvironmentId, BackgroundJobDedupWindow, ct);
+            await _store.UpsertBackgroundJobFailureAsync(bgFailure, dedupWindow, ct);
         }
 
         if (!string.IsNullOrEmpty(request.SessionId))
