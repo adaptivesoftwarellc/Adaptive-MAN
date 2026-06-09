@@ -11,9 +11,14 @@
  * This module only imports *types* from ./api, so there is no runtime import cycle.
  */
 import type {
+  AdminAppDto,
+  ApiKeyDto,
+  ApiKeyTypeName,
   AppDto,
+  AuditRowDto,
   BackgroundJobRowDto,
   DashboardQuery,
+  MintKeyResponse,
   ErrorRowDto,
   EventFilters,
   EventRowDto,
@@ -150,6 +155,123 @@ export function mockApps(): AppDto[] {
       environments: envs,
     },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Admin surface (Issue 10.6) — a small in-module store so create / mint / revoke
+// behave live within a demo session. Resets on full reload.
+// ---------------------------------------------------------------------------
+
+interface MockKey extends ApiKeyDto {
+  envKey: string; // `${slug}::${env}`
+}
+
+const ADMIN_ENVS = ['Production', 'Development'];
+
+function isoDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+const mockAdminAppStore: AdminAppDto[] = mockApps().map((a) => ({
+  id: a.id,
+  slug: a.slug,
+  name: a.name,
+  description: a.description,
+  is_active: true,
+  environments: ADMIN_ENVS.map((name, ei) => ({
+    id: `${a.slug}-${name}`,
+    name,
+    is_active: true,
+    total_key_count: 2 - (ei % 2),
+    active_key_count: 1,
+  })),
+}));
+
+const mockKeyStore: MockKey[] = mockAdminAppStore.flatMap((a) =>
+  a.environments.flatMap((e, ei) => {
+    const r = makeRng(`${a.slug}-${e.name}`);
+    return [
+      {
+        envKey: `${a.slug}::${e.name}`,
+        id: `00000000-0000-4000-8000-${String(Math.floor(r() * 1e12)).padStart(12, '0')}`,
+        key_type: ei % 2 === 0 ? 'ServerApi' : 'PublicClient',
+        created_at: isoDaysAgo(30),
+        last_used_at: isoDaysAgo(1),
+        expires_at: null,
+        revoked_at: null,
+        is_active: true,
+      } as MockKey,
+    ];
+  }),
+);
+
+export function mockAdminApps(): AdminAppDto[] {
+  return mockAdminAppStore.map((a) => ({ ...a, environments: a.environments.map((e) => ({ ...e })) }));
+}
+
+export function mockCreateApp(body: { name: string; slug: string; description?: string; environments?: string[] }): AdminAppDto {
+  const slug = body.slug.trim().toLowerCase();
+  let app = mockAdminAppStore.find((a) => a.slug === slug);
+  if (!app) {
+    app = {
+      id: slug,
+      slug,
+      name: body.name,
+      description: body.description ?? null,
+      is_active: true,
+      environments: (body.environments ?? ADMIN_ENVS).map((name) => ({
+        id: `${slug}-${name}`,
+        name,
+        is_active: true,
+        total_key_count: 0,
+        active_key_count: 0,
+      })),
+    };
+    mockAdminAppStore.push(app);
+  }
+  return { ...app, environments: app.environments.map((e) => ({ ...e })) };
+}
+
+export function mockKeys(slug: string, env: string): ApiKeyDto[] {
+  const envKey = `${slug}::${env}`;
+  return mockKeyStore
+    .filter((k) => k.envKey === envKey)
+    .map(({ envKey: _envKey, ...rest }) => rest)
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+}
+
+export function mockMintKey(keyType: ApiKeyTypeName): MintKeyResponse {
+  const id = crypto.randomUUID();
+  const prefix = keyType === 'PublicClient' ? 'aopub_' : 'aoserv_';
+  return {
+    id,
+    key_type: keyType,
+    plaintext_key: `${prefix}demo_${id.replace(/-/g, '').slice(0, 24)}`,
+    note: 'Store this immediately. The plaintext value is not retrievable after this response.',
+  };
+}
+
+export function mockAudit(q: { action?: string; app?: string } & PagingQuery): PagedResult<AuditRowDto> {
+  const actions = ['admin.app.created', 'admin.key.minted', 'admin.key.revoked', 'access.dashboard'];
+  const rows: AuditRowDto[] = Array.from({ length: 24 }).map((_, i) => ({
+    id: `aud-${i}`,
+    occurred_at: new Date(Date.now() - i * 3_600_000).toISOString(),
+    action: actions[i % actions.length],
+    actor_type: i % 4 === 3 ? 'admin_user' : 'admin_key',
+    application_id: null,
+    environment_id: null,
+    correlation_id: null,
+    details_json: JSON.stringify({ demo: true, seq: i }),
+  }));
+  const filtered = q.action ? rows.filter((r) => r.action === q.action) : rows;
+  const pageSize = q.pageSize ?? 50;
+  const page = q.page ?? 0;
+  return {
+    total: filtered.length,
+    page,
+    page_size: pageSize,
+    rows: filtered.slice(page * pageSize, page * pageSize + pageSize),
+  };
 }
 
 // ---------------------------------------------------------------------------

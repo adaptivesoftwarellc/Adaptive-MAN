@@ -163,6 +163,156 @@ public class AdminEndpointsTests : IClassFixture<IngestionWebApplicationFactory>
         DetailsJson = "{}",
     };
 
+    // ---- Issue 10.6 admin UI: list apps, list keys, revoke ----
+
+    private HttpClient IngestClient(string key)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthExtensions.HeaderName, key);
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return client;
+    }
+
+    [Fact]
+    public async Task ListApps_MissingAdminHeader_Returns401()
+    {
+        var resp = await AdminClient().GetAsync("/api/admin/apps");
+        resp.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    /// <summary>Creates a fresh app+env and mints a known set of keys so count assertions are isolated
+    /// from the other tests that mutate the shared <c>test-app</c> fixture. Returns the slug.</summary>
+    private async Task<string> SeedAppWithKeysAsync(HttpClient admin, int total, int revoked)
+    {
+        var slug = $"keys-{Guid.NewGuid():N}".Substring(0, 14);
+        await admin.PostAsJsonAsync("/api/admin/apps", new { name = "Keys Test", slug, environments = new[] { "Development" } });
+
+        for (var i = 0; i < total; i++)
+        {
+            var mint = await (await admin.PostAsJsonAsync(
+                $"/api/admin/apps/{slug}/environments/Development/keys", new { key_type = "server_api" }))
+                .Content.ReadFromJsonAsync<JsonElement>();
+            if (i < revoked)
+            {
+                var id = mint.GetProperty("id").GetGuid();
+                await admin.PostAsync($"/api/admin/apps/{slug}/environments/Development/keys/{id}/revoke", null);
+            }
+        }
+        return slug;
+    }
+
+    [Fact]
+    public async Task ListApps_ReturnsAppsWithEnvironmentsAndKeyCounts()
+    {
+        var client = AdminClient(_factory.AdminKeyPlaintext);
+        var slug = await SeedAppWithKeysAsync(client, total: 3, revoked: 1);
+
+        var body = await (await client.GetAsync("/api/admin/apps")).Content.ReadFromJsonAsync<JsonElement>();
+        var app = body.GetProperty("apps").EnumerateArray()
+            .Single(a => a.GetProperty("slug").GetString() == slug);
+        var dev = app.GetProperty("environments").EnumerateArray()
+            .Single(e => e.GetProperty("name").GetString() == "Development");
+
+        dev.GetProperty("total_key_count").GetInt32().Should().Be(3);
+        dev.GetProperty("active_key_count").GetInt32().Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ListKeys_ReturnsKeys_WithMaskingFieldsAndRevokedState()
+    {
+        var client = AdminClient(_factory.AdminKeyPlaintext);
+        var slug = await SeedAppWithKeysAsync(client, total: 3, revoked: 1);
+
+        var body = await (await client.GetAsync($"/api/admin/apps/{slug}/environments/Development/keys"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        var keys = body.GetProperty("keys").EnumerateArray().ToList();
+        keys.Should().HaveCount(3);
+        keys.Count(k => k.GetProperty("is_active").GetBoolean()).Should().Be(2);
+        // Read-only projection exposes the display fields for every key (last_used_at is null/omitted
+        // until the key actually authenticates a request)...
+        foreach (var k in keys)
+        {
+            k.TryGetProperty("created_at", out _).Should().BeTrue();
+            k.TryGetProperty("key_type", out _).Should().BeTrue();
+            k.TryGetProperty("is_active", out _).Should().BeTrue();
+        }
+        // ...and never the hash or plaintext.
+        body.ToString().Should().NotContain("KeyHash").And.NotContain("plaintext");
+    }
+
+    [Fact]
+    public async Task ListKeys_UnknownApp_Returns404()
+    {
+        var client = AdminClient(_factory.AdminKeyPlaintext);
+        var resp = await client.GetAsync($"/api/admin/apps/no-such-{Guid.NewGuid():N}/environments/Development/keys");
+        resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task RevokeKey_MintUseRevoke_ThenIngestReturns401_AndAudits()
+    {
+        var admin = AdminClient(_factory.AdminKeyPlaintext);
+
+        // Mint a fresh server key on the seeded app/env.
+        var mint = await (await admin.PostAsJsonAsync(
+            "/api/admin/apps/test-app/environments/Development/keys",
+            new { key_type = "server_api" })).Content.ReadFromJsonAsync<JsonElement>();
+        var keyId = mint.GetProperty("id").GetGuid();
+        var plaintext = mint.GetProperty("plaintext_key").GetString()!;
+
+        // The minted key authenticates ingest.
+        var ingest = IngestClient(plaintext);
+        var before = await ingest.PostAsJsonAsync("/api/ingest/events", new { @event = "auth_logout", distinct_id = "42" });
+        before.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        // Revoke it.
+        var revoke = await admin.PostAsync(
+            $"/api/admin/apps/test-app/environments/Development/keys/{keyId}/revoke", content: null);
+        revoke.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await revoke.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("already_revoked").GetBoolean().Should().BeFalse();
+
+        // Same key is now rejected.
+        var after = await IngestClient(plaintext)
+            .PostAsJsonAsync("/api/ingest/events", new { @event = "auth_logout", distinct_id = "42" });
+        after.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        // An admin.key.revoked audit row was written for this key.
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
+        (await db.AuditLogs.CountAsync(a => a.Action == "admin.key.revoked"
+            && a.DetailsJson.Contains(keyId.ToString()))).Should().BeGreaterThanOrEqualTo(1);
+        (await db.ApiKeys.SingleAsync(k => k.Id == keyId)).RevokedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RevokeKey_AlreadyRevoked_IsIdempotent()
+    {
+        var admin = AdminClient(_factory.AdminKeyPlaintext);
+        var mint = await (await admin.PostAsJsonAsync(
+            "/api/admin/apps/test-app/environments/Development/keys",
+            new { key_type = "public_client" })).Content.ReadFromJsonAsync<JsonElement>();
+        var keyId = mint.GetProperty("id").GetGuid();
+
+        var first = await admin.PostAsync($"/api/admin/apps/test-app/environments/Development/keys/{keyId}/revoke", null);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var second = await admin.PostAsync($"/api/admin/apps/test-app/environments/Development/keys/{keyId}/revoke", null);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await second.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("already_revoked").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RevokeKey_UnknownKey_Returns404()
+    {
+        var admin = AdminClient(_factory.AdminKeyPlaintext);
+        var resp = await admin.PostAsync(
+            $"/api/admin/apps/test-app/environments/Development/keys/{Guid.NewGuid()}/revoke", null);
+        resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     [Fact]
     public async Task GetAudit_MissingAdminHeader_Returns401()
     {

@@ -13,6 +13,10 @@ public interface IApiKeyResolver
 
 public sealed class ApiKeyResolver : IApiKeyResolver
 {
+    // Throttle LastUsedAt writes so a busy key doesn't add a write to every ingest call. One stamp per
+    // key per window is plenty for the "last used" admin display (Issue 10.6).
+    private static readonly TimeSpan LastUsedStampInterval = TimeSpan.FromMinutes(5);
+
     private readonly ObservabilityDbContext _db;
     private readonly IApiKeyHasher _hasher;
 
@@ -33,9 +37,33 @@ public sealed class ApiKeyResolver : IApiKeyResolver
             .AsNoTracking()
             .Where(k => k.KeyHash == hash)
             .Where(k => k.RevokedAt == null && (k.ExpiresAt == null || k.ExpiresAt > now))
-            .Select(k => new ResolvedApiKey(k.ApplicationId, k.EnvironmentId, k.KeyType))
+            .Select(k => new { k.Id, k.ApplicationId, k.EnvironmentId, k.KeyType, k.LastUsedAt })
             .FirstOrDefaultAsync(ct);
 
-        return key;
+        if (key is null) return null;
+
+        await StampLastUsedAsync(key.Id, key.LastUsedAt, now, ct);
+
+        return new ResolvedApiKey(key.ApplicationId, key.EnvironmentId, key.KeyType);
+    }
+
+    private async Task StampLastUsedAsync(Guid keyId, DateTime? lastUsedAt, DateTime now, CancellationToken ct)
+    {
+        if (lastUsedAt is { } prev && now - prev < LastUsedStampInterval) return;
+
+        try
+        {
+            await _db.ApiKeys
+                .Where(k => k.Id == keyId)
+                .ExecuteUpdateAsync(s => s.SetProperty(k => k.LastUsedAt, now), ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Last-used is best-effort telemetry; a failed stamp must never reject an otherwise valid key.
+        }
     }
 }

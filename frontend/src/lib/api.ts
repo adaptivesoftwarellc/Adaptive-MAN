@@ -70,6 +70,55 @@ export interface AppDto {
   environments: AppEnvironmentDto[];
 }
 
+// --- Issue 10.6 admin DTOs ---------------------------------------------------
+
+export interface AdminAppEnvironmentDto {
+  id: string;
+  name: string;
+  is_active: boolean;
+  total_key_count: number;
+  active_key_count: number;
+}
+
+export interface AdminAppDto {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  environments: AdminAppEnvironmentDto[];
+}
+
+export type ApiKeyTypeName = 'PublicClient' | 'ServerApi';
+
+export interface ApiKeyDto {
+  id: string;
+  key_type: ApiKeyTypeName;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  is_active: boolean;
+}
+
+export interface MintKeyResponse {
+  id: string;
+  key_type: ApiKeyTypeName;
+  plaintext_key: string;
+  note: string;
+}
+
+export interface AuditRowDto {
+  id: string;
+  occurred_at: string;
+  action: string;
+  actor_type: string;
+  application_id: string | null;
+  environment_id: string | null;
+  correlation_id: string | null;
+  details_json: string;
+}
+
 export interface HealthCardsDto {
   backend_500s: number;
   frontend_exceptions: number;
@@ -293,6 +342,55 @@ export const api = {
     USE_MOCKS
       ? delay(mock.mockTimeline(sessionId))
       : request<TimelineDto>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
+
+  // --- Issue 10.6 admin surface (always RBAC/admin-key gated server-side) ---
+  adminApps: () =>
+    USE_MOCKS
+      ? delay(mock.mockAdminApps())
+      : request<{ apps: AdminAppDto[] }>('/api/admin/apps').then((r) => r.apps),
+  createApp: (body: { name: string; slug: string; description?: string; environments?: string[] }) =>
+    USE_MOCKS
+      ? delay(mock.mockCreateApp(body))
+      : request<AdminAppDto>('/api/admin/apps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+  listKeys: (slug: string, env: string) =>
+    USE_MOCKS
+      ? delay(mock.mockKeys(slug, env))
+      : request<{ keys: ApiKeyDto[] }>(
+          `/api/admin/apps/${encodeURIComponent(slug)}/environments/${encodeURIComponent(env)}/keys`,
+        ).then((r) => r.keys),
+  mintKey: (slug: string, env: string, keyType: ApiKeyTypeName) =>
+    USE_MOCKS
+      ? delay(mock.mockMintKey(keyType))
+      : request<MintKeyResponse>(
+          `/api/admin/apps/${encodeURIComponent(slug)}/environments/${encodeURIComponent(env)}/keys`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key_type: keyType === 'PublicClient' ? 'public_client' : 'server_api' }),
+          },
+        ),
+  revokeKey: (slug: string, env: string, id: string) =>
+    USE_MOCKS
+      ? delay({ id, revoked_at: new Date().toISOString(), already_revoked: false })
+      : request<{ id: string; revoked_at: string; already_revoked: boolean }>(
+          `/api/admin/apps/${encodeURIComponent(slug)}/environments/${encodeURIComponent(env)}/keys/${encodeURIComponent(id)}/revoke`,
+          { method: 'POST' },
+        ),
+  audit: (q: { action?: string; app?: string; from?: string; to?: string } & PagingQuery) =>
+    USE_MOCKS
+      ? delay(mock.mockAudit(q))
+      : request<PagedResult<AuditRowDto>>(`/api/admin/audit${buildQuery({
+          action: q.action,
+          app: q.app,
+          from: q.from,
+          to: q.to,
+          page: q.page,
+          page_size: q.pageSize,
+        })}`),
 };
 
 export interface DashboardQuery {
