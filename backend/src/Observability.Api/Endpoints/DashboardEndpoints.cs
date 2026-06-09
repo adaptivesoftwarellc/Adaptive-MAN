@@ -1,13 +1,16 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Observability.Api.Middleware;
 using Observability.Domain.Telemetry;
 using Observability.Infrastructure.Persistence;
 
 namespace Observability.Api.Endpoints;
 
 /// <summary>
-/// Phase 3 dashboard read endpoints. Auth is intentionally a TODO until Phase 8 (RBAC); the
-/// dashboard runs unauthenticated against an internal-only network for the MVP.
+/// Phase 3 dashboard read endpoints. As of Issue 8.6 RBAC every read requires an authenticated user
+/// (<c>AddRequireUser</c>). Reads are app-scoped: global-read roles (Admin/Developer/Viewer) see any
+/// app; AppOwner is limited to assigned apps (a cross-app <c>?app=</c> is 403). Admin/Developer reads
+/// are audited.
 /// </summary>
 public static class DashboardEndpoints
 {
@@ -16,15 +19,60 @@ public static class DashboardEndpoints
 
     public static void MapDashboardEndpoints(this IEndpointRouteBuilder app)
     {
-        // App + environment metadata for filter dropdowns.
-        app.MapGet("/api/apps", GetApps);
+        // Empty-prefix group so /api/apps and /api/dashboard/* share the one auth gate.
+        var secured = app.MapGroup("").AddRequireUser();
 
-        var dash = app.MapGroup("/api/dashboard");
+        // App + environment metadata for filter dropdowns (filtered to the caller's readable apps).
+        secured.MapGet("/api/apps", GetApps);
+
+        var dash = secured.MapGroup("/api/dashboard");
+        dash.AddEndpointFilter(EnforceAppScopeAsync);
+        dash.AddEndpointFilter(AuditPrivilegedAccessAsync);
         dash.MapGet("/health", GetHealth);
         dash.MapGet("/errors", GetErrors);
         dash.MapGet("/background-jobs", GetBackgroundJobs);
         dash.MapGet("/events", GetEvents);
         dash.MapGet("/sessions", GetSessions);
+    }
+
+    /// <summary>
+    /// Tenant isolation for the read path (Issue 8.6). The <c>?app=</c> param drives every dashboard
+    /// query, so checking it once here covers all data endpoints uniformly: an AppOwner asking for an
+    /// app it doesn't own gets 403 before any query runs. Global readers always pass.
+    /// </summary>
+    private static async ValueTask<object?> EnforceAppScopeAsync(
+        EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        var http = ctx.HttpContext;
+        var user = http.GetUser();
+        if (Guid.TryParse(http.Request.Query["app"], out var appId) && !user.CanReadApplication(appId))
+            return Results.Json(new { error = "forbidden" }, statusCode: 403);
+
+        return await next(ctx);
+    }
+
+    /// <summary>Issue 8.6 acceptance — Admin/Developer access is logged. Records the app/env viewed.</summary>
+    private static async ValueTask<object?> AuditPrivilegedAccessAsync(
+        EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        var result = await next(ctx);
+
+        var http = ctx.HttpContext;
+        var user = http.GetUserOrNull();
+        if (user is { IsPrivileged: true } && Guid.TryParse(http.Request.Query["app"], out var appId))
+        {
+            var db = http.RequestServices.GetRequiredService<ObservabilityDbContext>();
+            Guid.TryParse(http.Request.Query["env"], out var envId);
+            AuditWriter.Add(db, http, "access.dashboard", appId, envId == Guid.Empty ? null : envId, new
+            {
+                email = user.Email,
+                role = user.Role.ToString(),
+                path = http.Request.Path.Value,
+            });
+            await db.SaveChangesAsync(http.RequestAborted);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -35,13 +83,18 @@ public static class DashboardEndpoints
     private static Guid? CanaryAppId(IConfiguration config) =>
         Guid.TryParse(config["Observability:CanaryApplicationId"], out var id) ? id : null;
 
-    private static async Task<IResult> GetApps(ObservabilityDbContext db, IConfiguration config, CancellationToken ct)
+    private static async Task<IResult> GetApps(HttpContext http, ObservabilityDbContext db, IConfiguration config, CancellationToken ct)
     {
+        var user = http.GetUser();
         var canaryAppId = CanaryAppId(config);
+        var isGlobalReader = user.IsGlobalReader;
+        var owned = user.OwnedApplicationIds.ToList();
         var apps = await db.Applications
             .AsNoTracking()
             .Where(a => a.IsActive)
             .Where(a => canaryAppId == null || a.Id != canaryAppId)
+            // AppOwner sees only assigned apps; global-read roles see all.
+            .Where(a => isGlobalReader || owned.Contains(a.Id))
             .OrderBy(a => a.Name)
             .Select(a => new
             {

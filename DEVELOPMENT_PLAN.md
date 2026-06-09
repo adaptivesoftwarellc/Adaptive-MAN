@@ -693,7 +693,7 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 - [x] Audit row written per call — new `AuditLogs` table (`Phase8AdminAuditLog` migration) with `Action`, `ActorType`, `ApplicationId`, `EnvironmentId`, `CorrelationId`, `DetailsJson`. Foreshadows 8.7's full audit surface.
 - [x] Integration tests in [`AdminEndpointsTests`](backend/tests/Observability.IntegrationTests/AdminEndpointsTests.cs): idempotent app creation (201 on first / 200 on duplicate, single row + matching audit rows); key minting returns plaintext on first call only with the prefix (`aopub_` / `aoserv_`), and `ApiKeyResolver` accepts the minted plaintext; 401 on missing/wrong header; 404 on unknown app; 400 on invalid `key_type`.
 - [x] `obs-api-dev` provisioned with the admin key + a test app/key for the 4.11 harness *(2026-05-22)*: `ObservabilityAdminKey` minted into `AdaptiveToolsKeyVault`; `aopub_…` public key minted for `dev-smoke`/`Development` via the live admin endpoint; harness PASSED end-to-end. Closes the deferred line in 5.7's acceptance criteria.
-- [ ] When 8.6 RBAC lands, the admin-key gate is replaced by role-based auth without changing the endpoint shape.
+- [x] When 8.6 RBAC lands, the admin-key gate is replaced by role-based auth without changing the endpoint shape — `AddAdminAuth` now accepts an Admin-role bearer token; the static admin key is retained as a break-glass/bootstrap path. Endpoint shapes unchanged.
 
 **Investigation questions:**
 - Where does the admin secret live for local dev vs. deployed envs? Same `appsettings.Development.json` pattern as `ApiKeyHashPepper` probably suffices.
@@ -702,11 +702,11 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 ### Issue 8.6 — RBAC
 **Description:** Admin / Developer / Viewer / AppOwner.
 **Acceptance criteria:**
-- [ ] Roles persisted, applied at API + UI
-- [ ] AppOwner cannot read other apps
-- [ ] Admin/Developer access logged
+- [x] Roles persisted, applied at API + UI — `Role` enum + `Users`/`UserApplicationAssignments` tables (`Phase8Rbac` migration, additive); enforced at the API via `AddRequireUser`/`AddAdminAuth` filters on `/api/dashboard/*`, `/api/sessions/{id}/timeline`, and `/api/admin/*`; gated at the UI via the dashboard `AuthProvider` (login screen, route guards, role-gated Admin nav).
+- [x] AppOwner cannot read other apps — `AuthenticatedUser.CanReadApplication` scopes AppOwner to assigned apps; a cross-app `?app=` is 403 and a cross-tenant timeline is 404. Pinned by `MultiTenantIsolationTests` (flipped from `KNOWN_GAP_8_6`).
+- [x] Admin/Developer access logged — privileged dashboard/timeline reads write `access.dashboard` / `access.timeline` audit rows.
 **Investigation questions:**
-- Identity source — Entra/AAD groups vs. local users?
+- ~~Identity source — Entra/AAD groups vs. local users?~~ **Decided: local users** (2026-06-08). Self-contained, no Azure dependency (consistent with this plan's non-Brandon scope); built behind the `IUserAuthenticator` seam so an Entra/AAD adapter can replace the local implementation without reworking roles or enforcement. See `docs/architecture.md`.
 
 ### Issue 8.7 — Audit logging
 **Description:** Audit dashboard access, settings changes, API key create/revoke.
@@ -875,13 +875,13 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Acceptance criteria:**
 - [x] New `MultiTenantIsolationTests` in `Observability.IntegrationTests` seeded with two distinct apps + envs
 - [x] Test: App A's `aoserv_…` key POSTs an event with a spoofed `application_id` field in the payload — the persisted row uses App A's id, never the spoofed value
-- [ ] Test: App A's key against `/api/dashboard/events?app=<App-B-id>` returns either empty results or 403 — never App B's data — **deferred to 8.6** (see below)
-- [ ] Test: same for `/api/dashboard/errors`, `/api/dashboard/sessions`, `/api/sessions/{id}/timeline` — **deferred to 8.6**
+- [x] Test: App A's key against `/api/dashboard/events?app=<App-B-id>` returns either empty results or 403 — never App B's data — **closed by 8.6**: an AppOwner of App A gets 403; an unauthenticated request gets 401.
+- [x] Test: same for `/api/dashboard/errors`, `/api/dashboard/sessions`, `/api/sessions/{id}/timeline` — **closed by 8.6** (timeline returns 404 cross-tenant so existence isn't confirmed).
 - [x] Test runs in CI on every PR; failure blocks merge
 
-**Status:** ✅ Ingestion-path isolation shipped in PR A2 (`phase-prod/cutover-gates`). Resolved the investigation question by scoping enforcement to ingestion now. Dashboard/timeline reads are unauthenticated (pre-8.6), so the read tests **assert the current leaky behavior** with loud `KNOWN_GAP_8_6` markers rather than 403/empty — they flip to the acceptance-criteria assertions when 8.6 lands.
+**Status:** ✅ Ingestion-path isolation shipped in PR A2 (`phase-prod/cutover-gates`). Dashboard/timeline read isolation landed with **8.6 RBAC** (`phase-8/6-rbac`): the three `KNOWN_GAP_8_6` tests in `MultiTenantIsolationTests` were flipped from asserting the leaky behavior to asserting 401 (unauthenticated) / 403 (cross-app AppOwner) / 404 (cross-tenant timeline), plus positive controls (AppOwner reads its own app; Admin reads any app and the access is audited).
 
-**Tracked follow-up (8.6 RBAC):** make `/api/dashboard/*` and `/api/sessions/{id}/timeline` reject cross-tenant `?app=`/session access (403 or empty). When 8.6 lands, update the two `KNOWN_GAP_8_6` tests in `MultiTenantIsolationTests` to assert the secured behavior and check the two boxes above.
+**Tracked follow-up (8.6 RBAC):** ~~make `/api/dashboard/*` and `/api/sessions/{id}/timeline` reject cross-tenant access~~ — **done** in `phase-8/6-rbac`.
 
 **Investigation questions:**
 - ~~Does the test live until 8.6 RBAC lands, or do we add api-key auth to dashboard endpoints now?~~ — resolved in PR A2: scope enforcement to the *ingestion* path immediately; dashboard isolation lands with 8.6.

@@ -28,7 +28,7 @@ public class SessionTimelineTests : IClassFixture<IngestionWebApplicationFactory
         await _factory.SeedAsync();
         var publicClient = AuthClient(_factory.PublicKeyPlaintext);
         var serverClient = AuthClient(_factory.ServerKeyPlaintext);
-        var dashboard = _factory.CreateClient();
+        var dashboard = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
 
         const string sid = "session-abc";
         const string distinct = "user-42";
@@ -123,7 +123,7 @@ public class SessionTimelineTests : IClassFixture<IngestionWebApplicationFactory
     public async Task Timeline_returns_404_for_unknown_session()
     {
         await _factory.SeedAsync();
-        var dashboard = _factory.CreateClient();
+        var dashboard = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
         var res = await dashboard.GetAsync("/api/sessions/does-not-exist/timeline");
         Assert.Equal(HttpStatusCode.NotFound, res.StatusCode);
     }
@@ -140,7 +140,7 @@ public class SessionTimelineTests : IClassFixture<IngestionWebApplicationFactory
         await _factory.SeedAsync();
         var publicClient = AuthClient(_factory.PublicKeyPlaintext);
         var serverClient = AuthClient(_factory.ServerKeyPlaintext);
-        var dashboard = _factory.CreateClient();
+        var dashboard = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
 
         const int n = 25;
         var sid = $"session-bulk-{Guid.NewGuid():N}";

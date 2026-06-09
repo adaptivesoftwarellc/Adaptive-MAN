@@ -26,6 +26,18 @@ public static class DependencyInjection
         services.AddSingleton<IApiKeyHasher, ApiKeyHasher>();
         services.AddSingleton<IApiKeyGenerator, ApiKeyGenerator>();
         services.AddScoped<IApiKeyResolver, ApiKeyResolver>();
+
+        // Issue 8.6 RBAC — local-user identity. PasswordHasher/AccessTokenService are stateless
+        // singletons; the authenticator is scoped because it reads the request-scoped DbContext.
+        services.Configure<AccessTokenOptions>(opts =>
+        {
+            opts.SigningKey = configuration["Observability:JwtSigningKey"] ?? string.Empty;
+            if (int.TryParse(configuration["Observability:AccessTokenLifetimeMinutes"], out var minutes) && minutes > 0)
+                opts.LifetimeMinutes = minutes;
+        });
+        services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<IAccessTokenService, AccessTokenService>();
+        services.AddScoped<IUserAuthenticator, LocalUserAuthenticator>();
         services.AddScoped<IIngestionStore, IngestionStore>();
         services.AddScoped<IErrorFingerprintBackfiller, ErrorFingerprintBackfiller>();
 

@@ -10,6 +10,7 @@ import {
 } from '../lib/presets';
 import type { DashboardView, ViewPage } from '../lib/presets';
 import { useFilters } from '../lib/filters';
+import { useAuth } from '../lib/AuthContext';
 import { USE_MOCKS, setMockMode } from '../lib/api';
 import {
   ActivityIcon,
@@ -26,12 +27,13 @@ import {
   XIcon,
 } from './icons';
 
-const links: { to: string; label: string; icon: ReactNode }[] = [
+// `adminOnly` links are hidden unless the current user has the Admin role (Issue 8.6 UI gating).
+const links: { to: string; label: string; icon: ReactNode; adminOnly?: boolean }[] = [
   { to: '/health', label: 'Health', icon: <ActivityIcon /> },
   { to: '/errors', label: 'Errors', icon: <AlertTriangleIcon /> },
   { to: '/events', label: 'Events', icon: <ListIcon /> },
   { to: '/sessions', label: 'Sessions', icon: <ClockIcon /> },
-  { to: '/admin/apps', label: 'Apps', icon: <GridIcon /> },
+  { to: '/admin/apps', label: 'Apps', icon: <GridIcon />, adminOnly: true },
 ];
 
 const COLLAPSE_KEY = 'observability:sidebar-collapsed';
@@ -49,6 +51,8 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export function Sidebar() {
   const location = useLocation();
   const { filters } = useFilters();
+  const { user, isAdmin, logout } = useAuth();
+  const visibleLinks = links.filter((l) => !l.adminOnly || isAdmin);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -126,7 +130,7 @@ export function Sidebar() {
 
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-4 scrollbar-thin">
         {!collapsed && <SectionLabel>Dashboards</SectionLabel>}
-        {links.map((l) => (
+        {visibleLinks.map((l) => (
           <NavLink
             key={l.to}
             to={l.to}
@@ -214,6 +218,41 @@ export function Sidebar() {
             </CollapsibleSection>
         )}
       </nav>
+
+      {/* Signed-in user + sign out */}
+      {user && (
+        <div className="border-t border-slate-800/60 px-3 py-3">
+          {collapsed ? (
+            <button
+              onClick={logout}
+              className="flex w-full items-center justify-center rounded-lg py-2 text-slate-400 transition hover:bg-slate-800/60 hover:text-slate-200"
+              title={`${user.email} (${user.role}) — sign out`}
+              aria-label="Sign out"
+            >
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-[10px] font-semibold text-slate-200">
+                {user.email.charAt(0).toUpperCase()}
+              </span>
+            </button>
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg px-1 py-1">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[11px] font-semibold text-slate-200">
+                {user.email.charAt(0).toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block truncate text-xs font-medium text-slate-200">{user.email}</span>
+                <span className="block text-[11px] text-slate-500">{user.role}</span>
+              </span>
+              <button
+                onClick={logout}
+                className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-slate-400 transition hover:bg-slate-800 hover:text-slate-200"
+                title="Sign out"
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Demo-data toggle */}
       <div className="border-t border-slate-800/60 px-3 py-3">

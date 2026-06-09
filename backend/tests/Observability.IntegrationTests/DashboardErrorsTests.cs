@@ -40,7 +40,8 @@ public class DashboardErrorsTests : IClassFixture<IngestionWebApplicationFactory
             await db.SaveChangesAsync();
         }
 
-        var dashboard = _factory.CreateClient();
+        // Dashboard reads require an authenticated user as of Issue 8.6; Admin is a global reader.
+        var dashboard = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
         var baseUrl = $"/api/dashboard/errors?app={_factory.SeededAppId}&env={_factory.SeededEnvId}";
 
         // No category -> all three rows.

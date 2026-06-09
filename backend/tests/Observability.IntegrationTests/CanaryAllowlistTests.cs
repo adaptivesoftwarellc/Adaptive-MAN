@@ -72,7 +72,8 @@ public class CanaryAllowlistTests
     {
         await using var factory = new CanaryNamespacedFactory();
         await factory.SeedAsync();
-        var client = factory.CreateClient();
+        // /api/apps requires an authenticated user as of Issue 8.6; Admin sees all (non-canary) apps.
+        var client = await factory.BearerClientAsync(factory.AdminEmail, factory.AdminPassword);
 
         var res = await client.GetAsync("/api/apps");
         res.StatusCode.Should().Be(HttpStatusCode.OK);

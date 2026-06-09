@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Observability.Domain.Applications;
 using Observability.Domain.Audit;
+using Observability.Domain.Identity;
 using Observability.Domain.Telemetry;
 using DomainApplication = Observability.Domain.Applications.Application;
 
@@ -19,6 +20,8 @@ public class ObservabilityDbContext : DbContext
     public DbSet<BackgroundJobFailure> BackgroundJobFailures => Set<BackgroundJobFailure>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<UserApplicationAssignment> UserApplicationAssignments => Set<UserApplicationAssignment>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -133,6 +136,28 @@ public class ObservabilityDbContext : DbContext
             e.Property(x => x.DetailsJson).HasColumnType("nvarchar(max)").IsRequired();
             e.HasIndex(x => x.OccurredAt);
             e.HasIndex(x => new { x.Action, x.OccurredAt });
+        });
+
+        b.Entity<User>(e =>
+        {
+            e.ToTable("Users");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Email).HasMaxLength(256).IsRequired();
+            e.HasIndex(x => x.Email).IsUnique();
+            e.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            e.Property(x => x.PasswordHash).HasMaxLength(512).IsRequired();
+            e.Property(x => x.Role).HasConversion<int>();
+        });
+
+        b.Entity<UserApplicationAssignment>(e =>
+        {
+            e.ToTable("UserApplicationAssignments");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.UserId, x.ApplicationId }).IsUnique();
+            e.HasOne(x => x.User)
+                .WithMany(u => u.ApplicationAssignments)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

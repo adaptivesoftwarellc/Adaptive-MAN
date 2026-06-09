@@ -29,9 +29,11 @@ public static class SessionEndpoints
 
     public static void MapSessionReadEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/sessions/{sessionId}/timeline", GetTimeline);
+        // Issue 8.6 — the timeline read is now authenticated and tenant-scoped (see GetTimeline).
+        var secured = app.MapGroup("").AddRequireUser();
+        secured.MapGet("/api/sessions/{sessionId}/timeline", GetTimeline);
         // Issue 10.4 — /api/v1 mirror; same handler, unprefixed path kept as a backwards-compatible alias.
-        app.MapGet("/api/v1/sessions/{sessionId}/timeline", GetTimeline);
+        secured.MapGet("/api/v1/sessions/{sessionId}/timeline", GetTimeline);
     }
 
     private static async Task<IResult> HandleStart(
@@ -83,6 +85,7 @@ public static class SessionEndpoints
     /// </summary>
     private static async Task<IResult> GetTimeline(
         string sessionId,
+        HttpContext http,
         ObservabilityDbContext db,
         CancellationToken ct)
     {
@@ -94,6 +97,23 @@ public static class SessionEndpoints
             return Results.NotFound(new { error = "session_not_found", session_id = sessionId });
 
         var session = result.Session;
+
+        // Issue 8.6 — tenant scope: an AppOwner may only read sessions of an app it owns. Return 404
+        // (not 403) so the endpoint doesn't confirm the session exists to a caller who can't see it.
+        var user = http.GetUser();
+        if (!user.CanReadApplication(session.ApplicationId))
+            return Results.NotFound(new { error = "session_not_found", session_id = sessionId });
+
+        if (user.IsPrivileged)
+        {
+            AuditWriter.Add(db, http, "access.timeline", session.ApplicationId, session.EnvironmentId, new
+            {
+                email = user.Email,
+                role = user.Role.ToString(),
+                session_id = session.SessionId,
+            });
+            await db.SaveChangesAsync(ct);
+        }
         var events = result.Events;
         var directErrors = result.CrossProcessErrors;
         var correlationIdSet = result.CorrelationIds;
