@@ -69,6 +69,36 @@ Managed identity per App Service, scoped read on its same-environment Key Vault.
 
 The endpoint also surfaces backend errors that share a `CorrelationId` with a FE event in the session — even when those errors have no `SessionId` of their own (e.g. server-side `server_error_occurred`). Each error entry is tagged `source: "in_session" | "cross_process"` so the UI can style them differently.
 
+## Error fingerprinting (Issue 8.1)
+
+Errors are grouped server-side by a **fingerprint** — a stable hash of the failure's shape — so that
+repeats collapse onto a single `Errors` row whose `OccurrenceCount` is incremented rather than
+spawning a new row per occurrence. The algorithm lives in one place: `ErrorFingerprint.Compute`
+(`Observability.Application/Ingestion/ErrorFingerprint.cs`).
+
+**Inputs (in order, pipe-joined):** `error_type | exception_type | endpoint_group | job_name`.
+Nulls are normalized to empty strings so the delimited shape is fixed. Volatile fields —
+`correlation_id`, `release_sha`, timestamps, `http_status_code`, `normalized_route` — are
+deliberately **excluded** so the same fault groups together across requests and releases.
+
+**Hash:** SHA-256 of the UTF-8 input, truncated to the first 32 hex chars (128 bits). This fits the
+64-char `Fingerprint` column with headroom; 128 bits is collision-resistant for the cardinality of
+distinct error shapes a single tenant produces.
+
+**Dedup key:** the unique index `(ApplicationId, EnvironmentId, Fingerprint)` enforces one row per
+distinct fault per tenant/environment. The upsert (`IngestionStore.UpsertErrorAsync`) bumps
+`OccurrenceCount` and advances `LastSeenAt` / `LastCorrelationId` on a hit.
+
+**Versioning & backfill.** Every row records the algorithm version that produced it in
+`FingerprintVersion`, sourced from the `ErrorFingerprint.CurrentVersion` constant (currently `1`).
+To evolve the algorithm, change `Compute` and increment `CurrentVersion` in the same change, then run
+the backfill: `POST /api/admin/fingerprints/backfill` (admin-key gated). The backfiller
+(`IErrorFingerprintBackfiller`) re-stamps every row below the current version, and when a recompute
+moves a row onto a fingerprint another row already owns, it **merges** them — summing
+`OccurrenceCount` and widening the first/last-seen bounds — so the unique index holds and no
+occurrence history is lost. The operation is idempotent and writes an `admin.fingerprint.backfilled`
+audit row.
+
 ## Open architectural questions
 
 - **Ingestion queue** — in-process `Channel<T>` for MVP (Phase 1), Service Bus when RPS warrants (Phase 8.9).

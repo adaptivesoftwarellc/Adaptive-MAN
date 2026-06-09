@@ -26,6 +26,7 @@ public static class DependencyInjection
         services.AddSingleton<IApiKeyGenerator, ApiKeyGenerator>();
         services.AddScoped<IApiKeyResolver, ApiKeyResolver>();
         services.AddScoped<IIngestionStore, IngestionStore>();
+        services.AddScoped<IErrorFingerprintBackfiller, ErrorFingerprintBackfiller>();
         services.AddSingleton<IPropertyAllowlistValidator, PropertyAllowlistValidator>();
         services.AddScoped<IIngestionService, IngestionService>();
 
