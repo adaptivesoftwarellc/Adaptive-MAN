@@ -91,6 +91,29 @@ node scripts/live-ingest-check.mjs
 
 Exit code 0 = pass. The SDK must be built first (`npm run build`).
 
+## Failure modes
+
+The SDK is fire-and-forget: `track`, `captureException`, and `captureFailedRequest` enqueue and return immediately, and the transport **never throws into your app** (`send` catches every error). All behavior below is in [`src/transport.ts`](src/transport.ts).
+
+- **Network unreachable / 5xx.** The failed item's `attempts` counter increments and it is re-queued after a backoff. Backoff is exponential with jitter: `min(30_000, 250 * 2^(attempt-1))` ms plus up to 30% random jitter — so ~250ms, ~500ms, ~1000ms for the default 3 attempts, capped at 30s.
+- **Dropped after retries.** Once an item exceeds `maxRetries` (**default 3**) it is **dropped silently**. There is **no `localStorage` / IndexedDB queue** — the buffer is in-memory only, so a hard refresh or tab close while items are retrying loses them. With `debug: true` a `dropped after retries` warning is logged.
+- **4xx responses are terminal.** A `4xx` means the payload was rejected (e.g. an allowlist `SafetyViolation` server-side); the item is **not** retried and is discarded. With `debug: true` a `rejected` warning logs the status. `200`/`202` count as success.
+- **Batch buffer.** Events buffer in an in-memory queue and flush when the queue reaches `batchSize` (**default 20**) or after `flushIntervalMs` (**default 5000ms**), whichever comes first. The queue is **not bounded** — under sustained backpressure (server down + high event volume) it can grow until the page is unloaded; it is not capped or spilled to disk. `flush()` is also called on `beforeunload` (best-effort, via `keepalive: true` fetch).
+- **`shutdown()`** drains the transport (final `flush()`), stops the replay adapter, and sends `/sessions/end`. After `shutdown()` the SDK is uninitialized; call `init()` again to resume.
+
+> *Future enhancement:* there is no `TransportStatus` callback today (e.g. to surface "N events dropped" to the host app). If added it would be an additive, non-breaking option on `init()`.
+
+## Troubleshooting: events don't appear
+
+Work down this checklist:
+
+1. **Is the SDK initialized?** `init()` is a no-op if called with `enabled: false`, and ignores a second call. Confirm exactly one `init()` ran with `enabled` unset/true.
+2. **Turn on `debug: true`.** This surfaces `rejected` (4xx) and `dropped after retries` warnings in the console — the two silent-loss paths above.
+3. **4xx in the network tab?** The payload violated the server allowlist or auth. A `401` means a bad/revoked `apiKey`; a `400`/`422` means a forbidden property — check [`docs/privacy-rules.md`](../../docs/privacy-rules.md) and look for a `SafetyViolation` row server-side.
+4. **Nothing leaves the browser at all?** Events flush on `batchSize` (20) or `flushIntervalMs` (5000ms). For a low-traffic page, wait 5s or call `flush()` explicitly. Verify `ingestUrl` resolves and isn't blocked by CORS/CSP.
+5. **Lost on navigation?** No persistent queue exists — items still retrying when the tab closes are gone. This is expected; see Failure modes.
+6. **Distinct id.** Events before `identify()` are attributed to `"anonymous"`; that's intended, not a drop.
+
 ## PostHog migration cheatsheet
 
 | PostHog (current SCH) | Adaptive (this SDK) |
