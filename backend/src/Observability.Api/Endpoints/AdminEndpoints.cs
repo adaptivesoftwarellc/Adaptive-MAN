@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Observability.Api.Middleware;
+using Observability.Application.Ingestion;
 using Observability.Domain.Applications;
 using Observability.Domain.Audit;
 using Observability.Infrastructure.Authentication;
@@ -27,6 +28,7 @@ public static class AdminEndpoints
         admin.MapPost("/apps", CreateApp);
         admin.MapPost("/apps/{slug}/environments/{env}/keys", MintKey);
         admin.MapGet("/audit", GetAudit);
+        admin.MapPost("/fingerprints/backfill", BackfillFingerprints);
     }
 
     public sealed record CreateAppRequest(string Name, string Slug, string? Description, string[]? Environments);
@@ -164,6 +166,41 @@ public static class AdminEndpoints
             plaintext_key = plaintext,
             note = "Store this immediately. The plaintext value is not retrievable after this response.",
         }, statusCode: 201);
+    }
+
+    public sealed record BackfillFingerprintsRequest(int? BatchSize);
+
+    /// <summary>
+    /// Issue 8.1 fingerprint backfill. Re-stamps <c>Errors</c> rows left on an older fingerprint
+    /// algorithm version up to the current one, merging any that collide onto a shared fingerprint.
+    /// Idempotent — a no-op once every row is on the current version. Writes an
+    /// <c>admin.fingerprint.backfilled</c> audit row with the result counts.
+    /// </summary>
+    private static async Task<IResult> BackfillFingerprints(
+        [FromBody] BackfillFingerprintsRequest? req,
+        IErrorFingerprintBackfiller backfiller,
+        ObservabilityDbContext db,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var result = await backfiller.BackfillAsync(req?.BatchSize ?? 500, ct);
+
+        await WriteAuditAsync(db, "admin.fingerprint.backfilled", null, null, http, new
+        {
+            scanned = result.Scanned,
+            updated = result.Updated,
+            merged = result.Merged,
+            target_version = result.TargetVersion,
+        }, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Ok(new
+        {
+            scanned = result.Scanned,
+            updated = result.Updated,
+            merged = result.Merged,
+            target_version = result.TargetVersion,
+        });
     }
 
     /// <summary>

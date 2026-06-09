@@ -22,6 +22,7 @@ public static class DashboardEndpoints
         var dash = app.MapGroup("/api/dashboard");
         dash.MapGet("/health", GetHealth);
         dash.MapGet("/errors", GetErrors);
+        dash.MapGet("/background-jobs", GetBackgroundJobs);
         dash.MapGet("/events", GetEvents);
         dash.MapGet("/sessions", GetSessions);
     }
@@ -204,6 +205,53 @@ public static class DashboardEndpoints
                 first_seen_at = e.FirstSeenAt,
                 last_seen_at = e.LastSeenAt,
                 last_correlation_id = e.LastCorrelationId
+            })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { total, page = skip / take, page_size = take, rows });
+    }
+
+    /// <summary>
+    /// Issue 8.2 — background-job incident view from the <c>BackgroundJobFailures</c> sidecar. Unlike
+    /// <see cref="GetErrors"/> (which derives a BG category from the global Errors table), this exposes
+    /// the per-(JobName, Fingerprint) incident with its dedup metrics: total occurrences and how many
+    /// were suppressed inside the alert window. Ordered by most recently seen.
+    /// </summary>
+    private static async Task<IResult> GetBackgroundJobs(
+        [FromQuery(Name = "app")] Guid? appId,
+        [FromQuery(Name = "env")] Guid? envId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        if (appId is null || envId is null)
+            return Results.BadRequest(new { error = "missing_filter", reason = "app and env are required." });
+
+        var range = ResolveRange(from, to);
+        var (skip, take) = ResolvePaging(page, pageSize);
+
+        var query = db.BackgroundJobFailures.AsNoTracking()
+            .Where(b => b.ApplicationId == appId && b.EnvironmentId == envId
+                        && b.LastSeenAt >= range.From && b.LastSeenAt < range.To)
+            .OrderByDescending(b => b.LastSeenAt);
+
+        var total = await query.LongCountAsync(ct);
+        var rows = await query.Skip(skip).Take(take)
+            .Select(b => new
+            {
+                id = b.Id,
+                job_name = b.JobName,
+                error_type = b.ErrorType,
+                fingerprint = b.Fingerprint,
+                release_sha = b.ReleaseSha,
+                occurrence_count = b.OccurrenceCount,
+                suppressed_count = b.SuppressedCount,
+                first_seen_at = b.FirstSeenAt,
+                last_seen_at = b.LastSeenAt,
+                last_suppressed_at = b.LastSuppressedAt,
             })
             .ToListAsync(ct);
 

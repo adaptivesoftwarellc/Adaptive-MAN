@@ -164,7 +164,92 @@ export function HealthPage() {
           </>
         )}
       </div>
+
+      {/* Background job incidents (Issue 8.2) */}
+      <SectionTitle className="mt-6">Background job incidents</SectionTitle>
+      <BackgroundJobsPanel app={filters.app} env={filters.env} from={range.from} to={range.to} ready={ready} />
     </div>
+  );
+}
+
+function BackgroundJobsPanel({
+  app,
+  env,
+  from,
+  to,
+  ready,
+}: {
+  app: string;
+  env: string;
+  from?: string;
+  to?: string;
+  ready: boolean;
+}) {
+  const { data, isLoading } = useQuery({
+    enabled: ready,
+    queryKey: ['background-jobs', app, env, from, to],
+    queryFn: () => api.backgroundJobs({ app, env, from, to, pageSize: 10 }),
+    refetchInterval: 30_000,
+  });
+
+  if (isLoading || !data) {
+    return (
+      <Panel className="p-4">
+        <Skeleton className="h-3 w-40" />
+        <div className="mt-4 space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-3 w-full" />
+          ))}
+        </div>
+      </Panel>
+    );
+  }
+
+  if (data.rows.length === 0) {
+    return (
+      <Panel className="p-4">
+        <div className="text-xs text-slate-400">No background job failures in this window.</div>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel className="overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-2.5">Job</th>
+            <th className="px-4 py-2.5">Error</th>
+            <th className="px-4 py-2.5 text-right">Occurrences</th>
+            <th className="px-4 py-2.5 text-right">Suppressed</th>
+            <th className="px-4 py-2.5 text-right">Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((row) => (
+            <tr key={row.id} className="border-b border-slate-50 last:border-0">
+              <td className="px-4 py-2.5 font-medium text-slate-700">{row.job_name}</td>
+              <td className="px-4 py-2.5 text-slate-500">{row.error_type}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                {row.occurrence_count.toLocaleString()}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                {row.suppressed_count > 0 ? (
+                  <span title="Duplicates collapsed inside the alert dedup window">
+                    {row.suppressed_count.toLocaleString()}
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-slate-400">
+                {new Date(row.last_seen_at).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
   );
 }
 

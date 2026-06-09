@@ -12,6 +12,7 @@
  */
 import type {
   AppDto,
+  BackgroundJobRowDto,
   DashboardQuery,
   ErrorRowDto,
   EventFilters,
@@ -297,6 +298,38 @@ export function mockErrors(
   } else {
     rows = rows.sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at));
   }
+  return paginate(rows, q);
+}
+
+export function mockBackgroundJobs(
+  q: DashboardQuery & PagingQuery,
+): PagedResult<BackgroundJobRowDto> {
+  const { from, to } = windowOf(q, 24 * 7);
+  const span = to.getTime() - from.getTime();
+  const r = makeRng(`${q.app}:${q.env}:bgjobs`);
+  const count = q.env === 'Production' ? 9 : 4;
+  const rows: BackgroundJobRowDto[] = [];
+  for (let i = 0; i < count; i++) {
+    const occurrences = intBetween(r, 1, 240);
+    // A slice of occurrences land inside the dedup window and are suppressed; never more than
+    // occurrences - 1 (the first is always the alert-worthy one).
+    const suppressed = occurrences > 1 ? intBetween(r, 0, occurrences - 1) : 0;
+    const lastSeen = new Date(from.getTime() + r() * span);
+    const firstSeen = new Date(from.getTime() + r() * (lastSeen.getTime() - from.getTime()));
+    rows.push({
+      id: count - i,
+      job_name: pick(r, JOB_NAMES),
+      error_type: pick(r, EXCEPTION_TYPES),
+      fingerprint: hex(r, 32),
+      release_sha: pick(r, RELEASES),
+      occurrence_count: occurrences,
+      suppressed_count: suppressed,
+      first_seen_at: firstSeen.toISOString(),
+      last_seen_at: lastSeen.toISOString(),
+      last_suppressed_at: suppressed > 0 ? lastSeen.toISOString() : null,
+    });
+  }
+  rows.sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at));
   return paginate(rows, q);
 }
 

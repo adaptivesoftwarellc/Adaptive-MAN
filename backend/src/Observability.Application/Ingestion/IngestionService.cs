@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Observability.Domain.Telemetry;
@@ -130,14 +128,14 @@ public sealed class IngestionService : IIngestionService
         var endpointGroup = TryGetString(props, "endpoint_group");
         var jobName = TryGetString(props, "job_name");
         var releaseSha = TryGetString(props, "release_sha");
-        var fingerprint = ComputeFingerprint(request.ErrorType, request.ExceptionType, endpointGroup, jobName);
+        var fingerprint = ErrorFingerprint.Compute(request.ErrorType, request.ExceptionType, endpointGroup, jobName);
 
         var record = new ErrorRecord
         {
             ApplicationId = context.ApplicationId,
             EnvironmentId = context.EnvironmentId,
             Fingerprint = fingerprint,
-            FingerprintVersion = 1,
+            FingerprintVersion = ErrorFingerprint.CurrentVersion,
             ErrorType = request.ErrorType,
             ExceptionType = request.ExceptionType,
             EndpointGroup = endpointGroup,
@@ -170,7 +168,9 @@ public sealed class IngestionService : IIngestionService
                 FirstSeenAt = record.FirstSeenAt,
                 LastSeenAt = record.LastSeenAt,
             };
-            await _store.UpsertBackgroundJobFailureAsync(bgFailure, BackgroundJobDedupWindow, ct);
+            var dedupWindow = await _store.ResolveBackgroundJobDedupWindowAsync(
+                context.ApplicationId, context.EnvironmentId, BackgroundJobDedupWindow, ct);
+            await _store.UpsertBackgroundJobFailureAsync(bgFailure, dedupWindow, ct);
         }
 
         if (!string.IsNullOrEmpty(request.SessionId))
@@ -192,11 +192,4 @@ public sealed class IngestionService : IIngestionService
 
     private static int? TryGetInt(IReadOnlyDictionary<string, JsonElement> props, string key) =>
         props.TryGetValue(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : null;
-
-    private static string ComputeFingerprint(string errorType, string? exceptionType, string? endpointGroup, string? jobName)
-    {
-        var raw = string.Join('|', errorType, exceptionType ?? "", endpointGroup ?? "", jobName ?? "");
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
-        return Convert.ToHexString(bytes)[..32].ToLowerInvariant();
-    }
 }

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Observability.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Observability.Infrastructure.Persistence;
 namespace Observability.Infrastructure.Migrations
 {
     [DbContext(typeof(ObservabilityDbContext))]
-    partial class ObservabilityDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260609012629_Phase8BgDedupWindowAndSuppressedCount")]
+    partial class Phase8BgDedupWindowAndSuppressedCount
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -87,20 +90,11 @@ namespace Observability.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
-                    b.Property<int?>("ErrorRetentionDays")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("EventRetentionDays")
-                        .HasColumnType("int");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
                     b.Property<bool>("ReplayEnabled")
                         .HasColumnType("bit");
-
-                    b.Property<int?>("ReplayRetentionDays")
-                        .HasColumnType("int");
 
                     b.HasKey("Id");
 
