@@ -160,9 +160,10 @@ pass; the evaluation itself is the scoped `IAlertEvaluator` so it can be invoked
 
 **Visibility-only.** Notifications (email/Teams) are deferred to 8.4, which is gated on the
 ACS-vs-SendGrid decision and a Brandon-adjacent webhook/ACS resource. Until then the engine only
-writes `FiredAlerts` rows for the dashboard to surface — it delivers nothing externally. The schema
-(rule + fired-alert tables) and the per-rule evaluators are the durable part; 8.4 adds a delivery
-sink over the persisted alerts without changing rule evaluation.
+writes `FiredAlerts` rows, surfaced read-only by `GET /api/dashboard/alerts` (same auth + app-scope
+gate as the other dashboard reads) and the dashboard's Alerts page — it delivers nothing externally.
+The schema (rule + fired-alert tables) and the per-rule evaluators are the durable part; 8.4 adds a
+delivery sink over the persisted alerts without changing rule evaluation.
 
 **Rule types** (each rule is scoped to an app and optionally a single environment; null = all envs):
 - `CountOverWindow` — events (optionally a named event) in the window ≥ threshold.

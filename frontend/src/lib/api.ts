@@ -187,6 +187,25 @@ export interface EventRowDto {
   properties_json: string;
 }
 
+export type AlertRuleTypeName =
+  | 'CountOverWindow'
+  | 'NewErrorAfterRelease'
+  | 'ErrorRateAboveThreshold'
+  | 'AnyProdJobFailure';
+
+export interface AlertRowDto {
+  id: number;
+  alert_rule_id: string;
+  rule_name: string | null;
+  rule_type: AlertRuleTypeName;
+  environment_id: string | null;
+  fired_at: string;
+  observed_value: number;
+  threshold: number;
+  summary: string;
+  details_json: string;
+}
+
 export interface SessionRowDto {
   id: number;
   session_id: string;
@@ -342,6 +361,10 @@ export const api = {
     USE_MOCKS
       ? delay(mock.mockTimeline(sessionId))
       : request<TimelineDto>(`/api/sessions/${encodeURIComponent(sessionId)}/timeline`),
+  alerts: (q: DashboardQuery & PagingQuery & { rule_type?: string }) =>
+    USE_MOCKS
+      ? delay(mock.mockAlerts(q))
+      : request<PagedResult<AlertRowDto>>(`/api/dashboard/alerts${buildQuery(q as unknown as AnyQuery)}`),
 
   // --- Issue 10.6 admin surface (always RBAC/admin-key gated server-side) ---
   adminApps: () =>

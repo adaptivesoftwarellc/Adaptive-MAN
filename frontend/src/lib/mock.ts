@@ -12,6 +12,8 @@
  */
 import type {
   AdminAppDto,
+  AlertRowDto,
+  AlertRuleTypeName,
   ApiKeyDto,
   ApiKeyTypeName,
   AppDto,
@@ -452,6 +454,67 @@ export function mockBackgroundJobs(
     });
   }
   rows.sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at));
+  return paginate(rows, q);
+}
+
+// ---------------------------------------------------------------------------
+// Alerts (Issue 8.3) — fired-alert feed. Visibility-only until 8.4 notifications.
+// ---------------------------------------------------------------------------
+
+const ALERT_RULES: { name: string; type: AlertRuleTypeName }[] = [
+  { name: 'Backend 500 spike', type: 'CountOverWindow' },
+  { name: 'New error after release', type: 'NewErrorAfterRelease' },
+  { name: 'Error rate guard', type: 'ErrorRateAboveThreshold' },
+  { name: 'Any prod job failure', type: 'AnyProdJobFailure' },
+];
+
+function alertSummary(r: Rng, type: AlertRuleTypeName, observed: number, threshold: number): string {
+  switch (type) {
+    case 'CountOverWindow':
+      return `${observed} 'server_error_occurred' events in the last 15m (threshold ${threshold}).`;
+    case 'NewErrorAfterRelease':
+      return `New error '${pick(r, EXCEPTION_TYPES)}' (${observed}x) first seen on release ${pick(r, RELEASES)}.`;
+    case 'ErrorRateAboveThreshold':
+      return `Error rate ${observed}% over the last 15m (threshold ${threshold}%).`;
+    case 'AnyProdJobFailure':
+      return `Production job '${pick(r, JOB_NAMES)}' failed (${pick(r, EXCEPTION_TYPES)}, ${observed}x).`;
+  }
+}
+
+export function mockAlerts(q: DashboardQuery & PagingQuery & { rule_type?: string }): PagedResult<AlertRowDto> {
+  const { from, to } = windowOf(q, 24 * 7);
+  const span = to.getTime() - from.getTime();
+  const r = makeRng(`${q.app}:${q.env}:alerts`);
+  const count = q.env === 'Production' ? 14 : 3;
+
+  let rows: AlertRowDto[] = [];
+  for (let i = 0; i < count; i++) {
+    const rule = pick(r, ALERT_RULES);
+    const threshold =
+      rule.type === 'ErrorRateAboveThreshold' ? 5 : rule.type === 'CountOverWindow' ? 50 : 0;
+    const observed =
+      rule.type === 'ErrorRateAboveThreshold'
+        ? intBetween(r, 6, 40)
+        : rule.type === 'CountOverWindow'
+          ? intBetween(r, 51, 400)
+          : intBetween(r, 1, 60);
+    const firedAt = new Date(from.getTime() + r() * span);
+    rows.push({
+      id: count - i,
+      alert_rule_id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      rule_name: rule.name,
+      rule_type: rule.type,
+      environment_id: null,
+      fired_at: firedAt.toISOString(),
+      observed_value: observed,
+      threshold,
+      summary: alertSummary(r, rule.type, observed, threshold),
+      details_json: JSON.stringify({ demo: true, window_minutes: 15 }),
+    });
+  }
+
+  if (q.rule_type) rows = rows.filter((a) => a.rule_type === q.rule_type);
+  rows.sort((a, b) => +new Date(b.fired_at) - +new Date(a.fired_at));
   return paginate(rows, q);
 }
 
