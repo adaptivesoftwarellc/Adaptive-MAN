@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Adaptive.ObservabilityClient;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Observability.Api.Configuration;
@@ -18,6 +19,13 @@ builder.Services.AddObservabilityInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddObservabilityRateLimiting(builder.Configuration);
+
+// Issue 10.8 — dogfood: register the SDK pointed at this same platform so its own unhandled
+// server errors are reported as telemetry under the `adaptive-observability-meta` app. Bound to the
+// `AdaptiveObservability` config section; `Enabled` defaults false (see appsettings) until the
+// meta-app + a server key are provisioned via the 8.9 admin endpoint and the key is wired in.
+// Disabled or unconfigured, every Capture/CaptureError is a no-op, so this is safe to always register.
+builder.Services.AddAdaptiveObservability(builder.Configuration, "AdaptiveObservability");
 
 var maxIngestBodyBytes = builder.Configuration.GetValue<long?>("Observability:Ingest:MaxBodyBytes")
     ?? IngestPayloadLimitMiddleware.DefaultMaxBodyBytes;
@@ -53,6 +61,11 @@ app.ValidateRequiredSecrets();
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
+
+// Issue 10.8 — dogfood. Wraps the rest of the pipeline so unhandled exceptions are reported as
+// `server_error_occurred` via the self-pointed SDK. Sits after CorrelationIdMiddleware so the
+// emitted error carries the request's correlation id; excludes the ingest surface (loop guard).
+app.UseMiddleware<ServerErrorTelemetryMiddleware>();
 
 // UseRouting must run before UseRateLimiter so the limiter can read the endpoint's
 // RequireRateLimiting metadata; otherwise the policy is silently never applied.

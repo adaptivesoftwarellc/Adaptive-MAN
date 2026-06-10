@@ -33,6 +33,7 @@ public sealed class AdaptiveObservabilityService : IAnalyticsService, IAsyncDisp
     private readonly BackgroundJobDeduper _dedup;
     private readonly Task _drainTask;
     private readonly CancellationTokenSource _cts = new();
+    private int _disposed;
 
     public AdaptiveObservabilityService(
         IOptions<AdaptiveObservabilityOptions> options,
@@ -131,9 +132,13 @@ public sealed class AdaptiveObservabilityService : IAnalyticsService, IAsyncDisp
 
     public async ValueTask DisposeAsync()
     {
+        // Idempotent per the IAsyncDisposable contract. The DI container can dispose this instance more
+        // than once (the typed HttpClient registration and the singleton IAnalyticsService factory both
+        // track it), so a second pass must not throw on the already-disposed CancellationTokenSource.
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
         try { await ShutdownAsync().ConfigureAwait(false); }
         catch { /* never throw from Dispose */ }
-        _cts.Cancel();
+        try { _cts.Cancel(); } catch { /* already disposed */ }
         _cts.Dispose();
     }
 

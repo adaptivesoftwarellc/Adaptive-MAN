@@ -1007,10 +1007,10 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Description:** `adaptive-observability` is a .NET ASP.NET Core app that emits no telemetry to itself. Dogfooding `AdaptiveSoftwareLLC.ObservabilityClient` against the platform's own API catches SDK breakages in CI and during deploys, before any onboarded app sees them. It also gives us a free quality-control loop for every SDK release.
 
 **Acceptance criteria:**
-- [ ] An `adaptive-observability-meta` app row provisioned via 8.9 admin endpoints (Dev + Prod)
-- [ ] `obs-api-dev` and `obs-api-prod` register the SDK via `AddAdaptiveObservability(...)` pointing at *themselves*
-- [ ] `server_error_occurred` events from real platform exceptions appear in the dashboard under the meta-app
-- [ ] Loop guard: the SDK already swallows transport failures silently, so a failing ingest path won't recursively emit. Document this constraint in `architecture.md`.
+- [~] An `adaptive-observability-meta` app row provisioned via 8.9 admin endpoints (Dev + Prod) — Dev: provisioning steps wired + documented in `appsettings.Development.json` and `architecture.md`; Prod row lands with the first Prod deploy (Brandon-gated).
+- [~] `obs-api-dev` and `obs-api-prod` register the SDK via `AddAdaptiveObservability(...)` pointing at *themselves* — Dev registration shipped in `Observability.Api/Program.cs` (`AdaptiveObservability` config section, off until the meta-app key is wired); Prod self-registration deferred to the first Prod deploy.
+- [x] `server_error_occurred` events from real platform exceptions appear in the dashboard under the meta-app — emitted by net-new `ServerErrorTelemetryMiddleware` on true 500s; covered by `MetaAppDogfoodTests` (emission shape + persistence under the meta-app). Force one in Dev via `GET /api/dev/throw`.
+- [x] Loop guard: the SDK already swallows transport failures silently, so a failing ingest path won't recursively emit. Document this constraint in `architecture.md`. — Documented; the middleware also excludes the ingest surface from emission as the primary guard (`ServerErrorTelemetryMiddleware.EmitsForPath`, tested).
 - [ ] During the next SDK version bump, the meta-app's event count is a regression signal (no events appearing = SDK broke)
 
 ### Issue 10.9 — Non-additive migration safety playbook

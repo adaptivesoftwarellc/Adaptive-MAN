@@ -179,6 +179,38 @@ the same `(rule, dedup key)` exists inside the rule's window. This keeps a stand
 re-firing on every pass while still letting a genuinely new occurrence (new fingerprint, new release)
 fire.
 
+## Dogfooding (Issue 10.8)
+
+The platform onboards itself: `Observability.Api` registers the .NET SDK
+(`AddAdaptiveObservability`, bound to the `AdaptiveObservability` config section) pointed back at its
+own ingest API, so the platform's own unhandled server errors become telemetry under a dedicated
+`adaptive-observability-meta` app. This gives the SDK + ingest path a continuous live regression
+signal that costs nothing to keep running.
+
+**Emission point.** `ServerErrorTelemetryMiddleware` (the platform's own `GlobalExceptionMiddleware`,
+ported in shape from SCH_API) wraps the request pipeline just inside `CorrelationIdMiddleware`. On an
+unhandled exception it emits one `server_error_occurred` through the registered `IAnalyticsService`,
+then re-throws so the normal 500 response is unchanged. Only the catalog-allowed fields leave the
+process — `exception_type`, `endpoint_group`, `http_status_code`, `correlation_id` (and `release_sha`,
+added by the SDK from its options) — **never** the exception message, stack trace, or an unnormalized
+route. Only true unhandled exceptions reach the catch, so 4xx and expected business results are never
+reported (matches the catalog's "True 500 … Not 4xx").
+
+**Loop guard.** The middleware excludes the ingest surface (`/api/ingest`, `/api/v1/ingest`) from
+emission. The SDK delivers `server_error_occurred` by POSTing it back to this same API's ingest path;
+if that path were itself failing, emitting on it would have the SDK POST a new error to the failing
+path, which 500s again — an unbounded self-feeding loop. Skipping the ingest surface is the primary
+guard. The backstop is the SDK itself: it swallows all transport failures (a 5xx/network error is
+retried then dropped, logged at `Debug`) and **never** calls `CaptureError` for its own send failures,
+so a failing ingest path can't recursively emit through the client either. A broken ingest path still
+returns 500 to its caller; it just produces no meta-app telemetry.
+
+**Provisioning.** The `adaptive-observability-meta` app row is created through the 8.9 admin endpoint
+(`POST /api/admin/apps`) with the admin key, then a `server_api` key is minted for the environment and
+wired into `AdaptiveObservability:ApiKey` (`HostUrl` points at the API itself). `Enabled` defaults
+false so the platform never self-reports until that wiring exists. Dev is provisioned now; the Prod
+meta-app and Prod self-registration land with the first Prod deploy (Brandon-gated).
+
 ## Open architectural questions
 
 - **Ingestion queue** — in-process `Channel<T>` for MVP (Phase 1), Service Bus when RPS warrants (Phase 8.9).
