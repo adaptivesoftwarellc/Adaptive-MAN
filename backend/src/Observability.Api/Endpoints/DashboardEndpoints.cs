@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Observability.Api.Middleware;
+using Observability.Domain.Alerting;
 using Observability.Domain.Telemetry;
 using Observability.Infrastructure.Persistence;
 
@@ -33,6 +34,7 @@ public static class DashboardEndpoints
         dash.MapGet("/background-jobs", GetBackgroundJobs);
         dash.MapGet("/events", GetEvents);
         dash.MapGet("/sessions", GetSessions);
+        dash.MapGet("/alerts", GetAlerts);
     }
 
     /// <summary>
@@ -401,6 +403,64 @@ public static class DashboardEndpoints
                 release_sha = s.ReleaseSha,
             })
             .ToListAsync(ct);
+
+        return Results.Ok(new { total, page = skip / take, page_size = take, rows });
+    }
+
+    /// <summary>
+    /// Issue 8.3 — fired-alert feed. The alert engine (Worker) is visibility-only until 8.4
+    /// notifications land, so this read is the only consumer of the <c>FiredAlerts</c> it persists.
+    /// App-wide rules produce alerts with a null <c>EnvironmentId</c>; those surface under any env view
+    /// alongside the selected env's own alerts. Ordered most-recently-fired first.
+    /// </summary>
+    private static async Task<IResult> GetAlerts(
+        [FromQuery(Name = "app")] Guid? appId,
+        [FromQuery(Name = "env")] Guid? envId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery(Name = "rule_type")] string? ruleType,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        if (appId is null || envId is null)
+            return Results.BadRequest(new { error = "missing_filter", reason = "app and env are required." });
+
+        var range = ResolveRange(from, to);
+        var (skip, take) = ResolvePaging(page, pageSize);
+
+        var query =
+            from f in db.FiredAlerts.AsNoTracking()
+            where f.ApplicationId == appId
+                  && (f.EnvironmentId == envId || f.EnvironmentId == null)
+                  && f.FiredAt >= range.From && f.FiredAt < range.To
+            join r in db.AlertRules.AsNoTracking() on f.AlertRuleId equals r.Id into rj
+            from r in rj.DefaultIfEmpty()
+            orderby f.FiredAt descending
+            select new { f, rule_name = r != null ? r.Name : null };
+
+        if (Enum.TryParse<AlertRuleType>(ruleType, out var parsedRuleType))
+            query = query.Where(x => x.f.RuleType == parsedRuleType);
+
+        var total = await query.LongCountAsync(ct);
+        var page0 = await query.Skip(skip).Take(take).ToListAsync(ct);
+
+        // RuleType -> string after materialization: the enum has a value-converter to int, and
+        // Enum.ToString() doesn't translate to SQL on the SqlServer provider.
+        var rows = page0.Select(x => new
+        {
+            id = x.f.Id,
+            alert_rule_id = x.f.AlertRuleId,
+            rule_name = x.rule_name,
+            rule_type = x.f.RuleType.ToString(),
+            environment_id = x.f.EnvironmentId,
+            fired_at = x.f.FiredAt,
+            observed_value = x.f.ObservedValue,
+            threshold = x.f.Threshold,
+            summary = x.f.Summary,
+            details_json = x.f.DetailsJson,
+        });
 
         return Results.Ok(new { total, page = skip / take, page_size = take, rows });
     }

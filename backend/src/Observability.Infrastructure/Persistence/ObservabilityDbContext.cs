@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Observability.Domain.Alerting;
 using Observability.Domain.Applications;
 using Observability.Domain.Audit;
 using Observability.Domain.Identity;
@@ -22,6 +23,8 @@ public class ObservabilityDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<User> Users => Set<User>();
     public DbSet<UserApplicationAssignment> UserApplicationAssignments => Set<UserApplicationAssignment>();
+    public DbSet<AlertRule> AlertRules => Set<AlertRule>();
+    public DbSet<FiredAlert> FiredAlerts => Set<FiredAlert>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -158,6 +161,28 @@ public class ObservabilityDbContext : DbContext
                 .WithMany(u => u.ApplicationAssignments)
                 .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<AlertRule>(e =>
+        {
+            e.ToTable("AlertRules");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            e.Property(x => x.RuleType).HasConversion<int>();
+            e.Property(x => x.EventName).HasMaxLength(64);
+            e.HasIndex(x => new { x.ApplicationId, x.IsEnabled });
+        });
+
+        b.Entity<FiredAlert>(e =>
+        {
+            e.ToTable("FiredAlerts");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.RuleType).HasConversion<int>();
+            e.Property(x => x.DedupKey).HasMaxLength(256).IsRequired();
+            e.Property(x => x.Summary).HasMaxLength(512).IsRequired();
+            e.Property(x => x.DetailsJson).HasColumnType("nvarchar(max)").IsRequired();
+            e.HasIndex(x => new { x.AlertRuleId, x.DedupKey, x.FiredAt });
+            e.HasIndex(x => new { x.ApplicationId, x.FiredAt });
         });
     }
 }

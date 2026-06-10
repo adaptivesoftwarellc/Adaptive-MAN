@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { HealthPage } from './pages/HealthPage';
 import { ErrorsPage } from './pages/ErrorsPage';
 import { EventsPage } from './pages/EventsPage';
+import { AlertsPage } from './pages/AlertsPage';
 import { SessionsPage } from './pages/SessionsPage';
 import { SessionTimelinePage } from './pages/SessionTimelinePage';
 import { AdminAppsPage } from './pages/AdminAppsPage';
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="health" element={<HealthPage />} />
         <Route path="errors" element={<ErrorsPage />} />
         <Route path="events" element={<EventsPage />} />
+        <Route path="alerts" element={<AlertsPage />} />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="sessions/:sessionId" element={<SessionTimelinePage />} />
         <Route

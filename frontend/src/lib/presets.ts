@@ -12,7 +12,7 @@
  */
 
 export type ViewSource = 'builtin' | 'user';
-export type ViewPage = 'health' | 'errors' | 'events' | 'sessions';
+export type ViewPage = 'health' | 'errors' | 'events' | 'sessions' | 'alerts';
 export type ViewRange = '1h' | '24h' | '7d' | '30d' | 'custom';
 
 export interface DashboardView {

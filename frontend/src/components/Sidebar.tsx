@@ -15,6 +15,7 @@ import { USE_MOCKS, setMockMode } from '../lib/api';
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  BellIcon,
   ListIcon,
   ClockIcon,
   GridIcon,
@@ -32,6 +33,7 @@ const links: { to: string; label: string; icon: ReactNode; adminOnly?: boolean }
   { to: '/health', label: 'Health', icon: <ActivityIcon /> },
   { to: '/errors', label: 'Errors', icon: <AlertTriangleIcon /> },
   { to: '/events', label: 'Events', icon: <ListIcon /> },
+  { to: '/alerts', label: 'Alerts', icon: <BellIcon /> },
   { to: '/sessions', label: 'Sessions', icon: <ClockIcon /> },
   { to: '/admin/apps', label: 'Apps', icon: <GridIcon />, adminOnly: true },
   { to: '/admin/audit', label: 'Audit log', icon: <ListIcon />, adminOnly: true },
@@ -43,6 +45,7 @@ function pageFromPath(pathname: string): ViewPage | null {
   if (pathname.startsWith('/health')) return 'health';
   if (pathname.startsWith('/errors')) return 'errors';
   if (pathname.startsWith('/events')) return 'events';
+  if (pathname.startsWith('/alerts')) return 'alerts';
   if (pathname.startsWith('/sessions')) return 'sessions';
   return null;
 }
