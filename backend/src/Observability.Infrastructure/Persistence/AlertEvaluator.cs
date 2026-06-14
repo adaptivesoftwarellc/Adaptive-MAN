@@ -42,10 +42,22 @@ public sealed class AlertEvaluator : IAlertEvaluator
 
             foreach (var alert in candidates)
             {
-                // Suppress the same logical alert re-firing on every pass: only write when no prior row
-                // for this rule + dedup key exists inside the rule's window.
-                var alreadyFired = await _db.FiredAlerts.AnyAsync(
-                    f => f.AlertRuleId == rule.Id && f.DedupKey == alert.DedupKey && f.FiredAt >= windowStart, ct);
+                // Suppress the same logical alert re-firing on every pass. NewErrorAfterRelease must fire
+                // exactly once per (fingerprint, release) — ever — so a brand-new error doesn't re-alert
+                // each window it stays inside; its dedup key already encodes the release. Every other rule
+                // type dedups within the rule window, so a standing condition re-notifies once per window
+                // rather than on every 60s pass.
+                bool alreadyFired;
+                if (rule.RuleType == AlertRuleType.NewErrorAfterRelease)
+                {
+                    alreadyFired = await _db.FiredAlerts.AnyAsync(
+                        f => f.AlertRuleId == rule.Id && f.DedupKey == alert.DedupKey, ct);
+                }
+                else
+                {
+                    alreadyFired = await _db.FiredAlerts.AnyAsync(
+                        f => f.AlertRuleId == rule.Id && f.DedupKey == alert.DedupKey && f.FiredAt >= windowStart, ct);
+                }
                 if (alreadyFired) continue;
 
                 _db.FiredAlerts.Add(alert);

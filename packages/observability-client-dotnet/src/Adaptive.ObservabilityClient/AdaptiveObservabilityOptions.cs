@@ -5,7 +5,11 @@ namespace Adaptive.ObservabilityClient;
 /// </summary>
 public sealed class AdaptiveObservabilityOptions
 {
-    public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// Off by default so a host that binds a config section omitting <c>Enabled</c> fails safe (emits
+    /// nothing) rather than silently self-reporting. Hosts opt in explicitly via config or code.
+    /// </summary>
+    public bool Enabled { get; set; } = false;
     public string HostUrl { get; set; } = string.Empty;
     public string ApiKey { get; set; } = string.Empty;
     public string Environment { get; set; } = "Development";

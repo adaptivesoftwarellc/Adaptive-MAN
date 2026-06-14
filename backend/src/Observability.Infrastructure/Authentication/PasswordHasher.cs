@@ -51,6 +51,10 @@ public sealed class PasswordHasher : IPasswordHasher
             return false;
         }
 
+        // Reject a malformed/empty stored hash. Without this guard a blank hash segment would derive a
+        // zero-length key and FixedTimeEquals([], []) returns true — i.e. any password would authenticate.
+        if (expected.Length != HashBytes) return false;
+
         var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, Algorithm, expected.Length);
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }

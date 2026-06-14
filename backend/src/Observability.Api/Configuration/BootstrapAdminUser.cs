@@ -26,15 +26,26 @@ public static class BootstrapAdminUser
             return;
 
         var normalized = email.Trim().ToLowerInvariant();
-        db.Users.Add(new User
+        var entry = db.Users.Add(new User
         {
             Email = normalized,
             DisplayName = config["Observability:Bootstrap:AdminDisplayName"]?.Trim() ?? "Administrator",
             PasswordHash = hasher.Hash(password),
             Role = Role.Admin,
         });
-        await db.SaveChangesAsync();
 
-        logger.LogInformation("Bootstrapped initial Admin user {Email} (Users table was empty).", normalized);
+        try
+        {
+            await db.SaveChangesAsync();
+            logger.LogInformation("Bootstrapped initial Admin user {Email} (Users table was empty).", normalized);
+        }
+        catch (DbUpdateException)
+        {
+            // Concurrent startup of another instance won the race and seeded first; the unique index on
+            // Email rejects this insert. That's the intended outcome — treat "already seeded" as success
+            // rather than crashing this instance's startup.
+            entry.State = EntityState.Detached;
+            logger.LogInformation("Bootstrap admin already seeded by another instance; skipping.");
+        }
     }
 }

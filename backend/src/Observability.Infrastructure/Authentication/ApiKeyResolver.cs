@@ -53,8 +53,11 @@ public sealed class ApiKeyResolver : IApiKeyResolver
 
         try
         {
+            // Re-check the throttle in the WHERE clause so a burst of concurrent requests that all read the
+            // same stale LastUsedAt collapses to a single write — only the first past the cutoff matches.
+            var cutoff = now - LastUsedStampInterval;
             await _db.ApiKeys
-                .Where(k => k.Id == keyId)
+                .Where(k => k.Id == keyId && (k.LastUsedAt == null || k.LastUsedAt < cutoff))
                 .ExecuteUpdateAsync(s => s.SetProperty(k => k.LastUsedAt, now), ct);
         }
         catch (OperationCanceledException)

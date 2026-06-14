@@ -34,6 +34,7 @@ public interface IAccessTokenService
 /// </summary>
 public sealed class AccessTokenService : IAccessTokenService
 {
+    private const int MinSigningKeyBytes = 32;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly byte[] _signingKey;
     private readonly int _lifetimeMinutes;
@@ -47,6 +48,11 @@ public sealed class AccessTokenService : IAccessTokenService
                 "Observability:JwtSigningKey is not configured. Set it via Key Vault (deployed) or appsettings.Development.json (local).");
         }
         _signingKey = Encoding.UTF8.GetBytes(key);
+        if (_signingKey.Length < MinSigningKeyBytes)
+        {
+            throw new InvalidOperationException(
+                $"Observability:JwtSigningKey is too short ({_signingKey.Length} bytes). HMAC-SHA256 requires at least {MinSigningKeyBytes} bytes of key material.");
+        }
         _lifetimeMinutes = options.Value.LifetimeMinutes > 0 ? options.Value.LifetimeMinutes : 480;
     }
 
@@ -77,8 +83,19 @@ public sealed class AccessTokenService : IAccessTokenService
         var parts = token.Split('.');
         if (parts.Length != 3) return null;
 
-        var expectedSig = Sign($"{parts[0]}.{parts[1]}");
-        if (!FixedTimeEquals(parts[2], expectedSig)) return null;
+        // Compare raw HMAC bytes, not the base64url strings, so the constant-time guarantee holds and no
+        // length is leaked through the string encoding.
+        var expectedSig = SignBytes($"{parts[0]}.{parts[1]}");
+        byte[] providedSig;
+        try
+        {
+            providedSig = Base64UrlDecode(parts[2]);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+        if (!CryptographicOperations.FixedTimeEquals(providedSig, expectedSig)) return null;
 
         Payload? payload;
         try
@@ -98,17 +115,12 @@ public sealed class AccessTokenService : IAccessTokenService
         return new TokenClaims(userId, payload.email, (Role)payload.role);
     }
 
-    private string Sign(string data)
-    {
-        var sig = HMACSHA256.HashData(_signingKey, Encoding.UTF8.GetBytes(data));
-        return Base64UrlEncode(sig);
-    }
+    private byte[] SignBytes(string data) => HMACSHA256.HashData(_signingKey, Encoding.UTF8.GetBytes(data));
+
+    private string Sign(string data) => Base64UrlEncode(SignBytes(data));
 
     private static string Encode<T>(T value) =>
         Base64UrlEncode(JsonSerializer.SerializeToUtf8Bytes(value, Json));
-
-    private static bool FixedTimeEquals(string a, string b) =>
-        CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 
     private static string Base64UrlEncode(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');

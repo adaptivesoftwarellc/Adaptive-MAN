@@ -17,6 +17,17 @@ public sealed class RetentionSweeper : IRetentionSweeper
         _options = options.Value;
     }
 
+    public async Task<DateTime?> GetLastSweepAtUtcAsync(CancellationToken ct)
+    {
+        var last = await _db.AuditLogs
+            .AsNoTracking()
+            .Where(a => a.Action == "admin.retention.swept")
+            .OrderByDescending(a => a.OccurredAt)
+            .Select(a => (DateTime?)a.OccurredAt)
+            .FirstOrDefaultAsync(ct);
+        return last;
+    }
+
     public async Task<RetentionSweepResult> SweepAsync(CancellationToken ct)
     {
         var now = DateTime.UtcNow;
@@ -47,9 +58,12 @@ public sealed class RetentionSweeper : IRetentionSweeper
         }
 
         // Audit log retention is global, not per-environment (enforces the 8.7/PR C 365-day policy).
+        // Prune by age only: this run's own admin.retention.swept row is added afterward with
+        // OccurredAt = now, so it can never fall before the cutoff. Filtering on Action instead would
+        // permanently exempt every past sweep row and let them grow unbounded.
         var auditCutoff = now.AddDays(-_options.AuditLogRetentionDays);
         var auditDeleted = await DeleteBatchedAsync(
-            _db.AuditLogs.Where(a => a.OccurredAt < auditCutoff && a.Action != "admin.retention.swept"),
+            _db.AuditLogs.Where(a => a.OccurredAt < auditCutoff),
             batchSize, ct);
 
         var result = new RetentionSweepResult(eventsDeleted, errorsDeleted, auditDeleted, environments.Count);

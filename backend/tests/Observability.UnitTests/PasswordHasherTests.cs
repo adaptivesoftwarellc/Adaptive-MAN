@@ -37,4 +37,14 @@ public class PasswordHasherTests
     {
         _hasher.Verify("any", encoded).Should().BeFalse();
     }
+
+    [Fact]
+    public void Verify_WithEmptyHashSegment_DoesNotAuthenticate()
+    {
+        // Regression: an empty (or non-32-byte) stored hash must never validate. Otherwise the derived
+        // key length is 0 and FixedTimeEquals([], []) returns true — any password would authenticate.
+        var validSalt = Convert.ToBase64String(new byte[16]);
+        _hasher.Verify("any password at all", $"pbkdf2$100000${validSalt}$").Should().BeFalse();
+        _hasher.Verify("any password at all", $"pbkdf2$100000${validSalt}{'$'}{Convert.ToBase64String(new byte[8])}").Should().BeFalse();
+    }
 }
