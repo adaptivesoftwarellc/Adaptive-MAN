@@ -47,6 +47,9 @@ public class IngestionWebApplicationFactory : WebApplicationFactory<Program>
                 ["Observability:ApiKeyHashPepper"] = "test-pepper",
                 ["Observability:AdminApiKey"] = AdminKeyPlaintext,
                 ["Observability:JwtSigningKey"] = "test-jwt-signing-key-0123456789abcdef0123456789",
+                // Issue 10.8 — keep the dogfood SDK inert by default so tests don't attempt self-ingest
+                // over HTTP. The dogfood test overrides this and supplies a recording IAnalyticsService.
+                ["AdaptiveObservability:Enabled"] = "false",
             });
         });
 

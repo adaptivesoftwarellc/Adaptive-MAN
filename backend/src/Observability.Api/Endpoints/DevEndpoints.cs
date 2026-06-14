@@ -38,5 +38,18 @@ public static class DevEndpoints
 
             return Results.Ok(new { outcome = result.Outcome.ToString() });
         });
+
+        // Issue 10.8 — dogfood verify hook. Forces an unhandled exception so the
+        // ServerErrorTelemetryMiddleware emits a `server_error_occurred` through the self-pointed SDK,
+        // landing a server-category error row under the `adaptive-observability-meta` app. Dev-only.
+        app.MapGet("/api/dev/throw", void (string? kind) =>
+        {
+            throw kind switch
+            {
+                "timeout" => new TimeoutException("dev-forced timeout"),
+                "invalid" => new InvalidOperationException("dev-forced invalid operation"),
+                _ => new Exception("dev-forced unhandled exception"),
+            };
+        });
     }
 }
