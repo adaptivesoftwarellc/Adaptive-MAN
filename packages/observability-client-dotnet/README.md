@@ -3,7 +3,7 @@
 > NuGet package id is `AdaptiveSoftwareLLC.ObservabilityClient`; the .NET namespace remains `Adaptive.ObservabilityClient`. The `Adaptive.*` prefix on nuget.org is reserved by another account.
 
 
-ASP.NET Core SDK for the Adaptive Observability platform. Ships an `IAnalyticsService` implementation whose contract is identical to SCH's existing `SCH.Core.Interfaces.IAnalyticsService`, so cutover is a DI registration swap — no call sites change.
+ASP.NET Core SDK for the Adaptive Observability platform. Ships an `IAnalyticsService` implementation whose contract follows the PostHog Phase 1 catalog, so an app migrating off PostHog swaps one DI registration (no call sites change) and a greenfield tenant (e.g. WMSAPI) instruments against a small, stable interface.
 
 ## Install
 
@@ -100,7 +100,9 @@ public sealed class NightlyImport(IAnalyticsService analytics) : BackgroundServi
 5. **High-volume burst with the API down?** The channel caps at 10,000 and drops oldest-first, so a sustained outage loses the earliest events. Confirmed by `send swallowed` debug logs.
 6. **Missing background-job errors?** Identical `(job_name, error_type)` failures are deduped for 15 min by default. Widen or narrow `BackgroundJobDedupWindow` if expected failures are being suppressed.
 
-## PostHog migration cheatsheet (SCH-side)
+## PostHog migration cheatsheet
+
+For an app already on PostHog, cutover is one DI registration:
 
 ```diff
   // Program.cs
@@ -109,19 +111,7 @@ public sealed class NightlyImport(IAnalyticsService analytics) : BackgroundServi
 + builder.Services.AddAdaptiveObservability(builder.Configuration.GetSection("AdaptiveObservability"));
 ```
 
-No call site in `GlobalExceptionMiddleware.cs` or any background service changes — all consumers use `IAnalyticsService` and don't see the implementation.
-
-For the dual-write composite window (Phase 6.6), register both:
-
-```csharp
-builder.Services.AddSingleton<PostHogService>();
-builder.Services.AddSingleton<AdaptiveObservabilityService>();
-builder.Services.AddSingleton<IAnalyticsService>(sp => new CompositeAnalyticsService(
-    sp.GetRequiredService<PostHogService>(),
-    sp.GetRequiredService<AdaptiveObservabilityService>()));
-```
-
-(`CompositeAnalyticsService` lives in SCH for the cutover window — it's not part of this SDK.)
+No call site in your exception middleware or background services changes — all consumers use `IAnalyticsService` and don't see the implementation. Greenfield tenants (e.g. WMSAPI) skip this entirely and just add the `AddAdaptiveObservability(...)` line.
 
 ## Privacy
 

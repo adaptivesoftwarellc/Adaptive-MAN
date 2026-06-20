@@ -1,13 +1,18 @@
 <#
 .SYNOPSIS
-    Phase 6.6 -- onboard SCH_UI + SCH_API in adaptive-observability.
+    Phase 7 -- onboard WMSSite + WMSAPI in adaptive-observability.
 
 .DESCRIPTION
-    Idempotent. Creates the two SCH application rows + Dev/Prod environments,
-    then mints one PublicClient key (for SCH_UI) and one ServerApi key
-    (for SCH_API) per environment. Plaintext key values are printed once --
-    capture them and store in SCH's secrets immediately. They are NOT
+    Idempotent. Creates the two WMS application rows + Dev/Prod environments,
+    then mints one PublicClient key (for WMSSite) and one ServerApi key
+    (for WMSAPI) per environment. Plaintext key values are printed once --
+    capture them and store in the WMS secret stores immediately. They are NOT
     retrievable from the platform after this script exits.
+
+    Note: WMSSite lives on the `adaptivesoftwarellc` org and WMSAPI on
+    `bdadaptivewoundmsllc` -- same product, two orgs. The two keys land in
+    different secret stores (see "Next steps" below). See docs/audits/wmssite.md
+    and docs/audits/wmsapi.md.
 
 .PARAMETER ApiBase
     Adaptive Observability API base URL. Defaults to obs-api-dev.
@@ -17,8 +22,8 @@
     AdaptiveToolsKeyVault secret named ObservabilityAdminKey via az CLI.
 
 .EXAMPLE
-    .\onboard-sch.ps1
-    # Pulls admin key from KV, hits obs-api-dev, mints 4 keys (sch-ui Dev/Prod, sch-api Dev/Prod).
+    .\onboard-wms.ps1
+    # Pulls admin key from KV, hits obs-api-dev, mints 4 keys (wms-site Dev/Prod, wms-api Dev/Prod).
 #>
 
 param(
@@ -78,29 +83,31 @@ function Mint-Key([string]$slug, [string]$env, [string]$keyType) {
     return $resp
 }
 
-Write-Host "=== Adaptive Observability -- SCH onboarding (Phase 6.6) ==="
+Write-Host "=== Adaptive Observability -- WMS onboarding (Phase 7) ==="
 Write-Host "API base: $ApiBase"
 
-Create-App -slug "sch-ui"  -name "SCH UI"  -description "Strategic Health Care -- frontend (React + Vite + MSAL)" | Out-Null
-Create-App -slug "sch-api" -name "SCH API" -description "Strategic Health Care -- backend (.NET 10, ASP.NET Core)"  | Out-Null
+Create-App -slug "wms-site" -name "WMS Site" -description "Wound Management -- frontend (React + Vite + MSAL)"        | Out-Null
+Create-App -slug "wms-api"  -name "WMS API"  -description "Wound Management -- backend (.NET 8, ASP.NET Core, JWT)"   | Out-Null
 
 Write-Host ""
-Write-Host "--- Minting public-client keys for SCH_UI ---"
-Mint-Key -slug "sch-ui" -env "Development" -keyType "PublicClient" | Out-Null
-Mint-Key -slug "sch-ui" -env "Production"  -keyType "PublicClient" | Out-Null
+Write-Host "--- Minting public-client keys for WMSSite ---"
+Mint-Key -slug "wms-site" -env "Development" -keyType "PublicClient" | Out-Null
+Mint-Key -slug "wms-site" -env "Production"  -keyType "PublicClient" | Out-Null
 
 Write-Host ""
-Write-Host "--- Minting server keys for SCH_API ---"
-Mint-Key -slug "sch-api" -env "Development" -keyType "ServerApi" | Out-Null
-Mint-Key -slug "sch-api" -env "Production"  -keyType "ServerApi" | Out-Null
+Write-Host "--- Minting server keys for WMSAPI ---"
+Mint-Key -slug "wms-api" -env "Development" -keyType "ServerApi" | Out-Null
+Mint-Key -slug "wms-api" -env "Production"  -keyType "ServerApi" | Out-Null
 
 Write-Host ""
 Write-Host "=== DONE ===" -ForegroundColor Green
 Write-Host "Next steps:"
 Write-Host "  1. Store the four plaintext keys above in the appropriate secret stores:"
-Write-Host "     * SCH_UI:  add VITE_OBSERVABILITY_KEY (Dev + Prod) as GitHub repo secrets"
-Write-Host "                VITE_OBSERVABILITY_URL = $ApiBase"
-Write-Host "     * SCH_API: add AdaptiveObservability--ApiKey (Dev + Prod) to SCH's Key Vault"
+Write-Host "     * WMSSite (adaptivesoftwarellc/WMSSite):"
+Write-Host "                add VITE_OBSERVABILITY_KEY (Dev + Prod) as GitHub repo secrets"
+Write-Host "                VITE_OBSERVABILITY_URL = $ApiBase ; VITE_OBSERVABILITY_ENABLED = true"
+Write-Host "     * WMSAPI (bdadaptivewoundmsllc/WMSAPI):"
+Write-Host "                add AdaptiveObservability:ApiKey (Dev + Prod) to WMS's Key Vault / env"
 Write-Host "                set AdaptiveObservability:Enabled=true and HostUrl=$ApiBase"
-Write-Host "  2. Merge the two SCH feature/adaptive-observability PRs."
-Write-Host "  3. Begin the 5-business-day SCH Dev shakedown soak."
+Write-Host "  2. Merge the WMSSite + WMSAPI feature/adaptive-observability PRs (Issues 7.1 / 7.2)."
+Write-Host "  3. Watch obs-api-dev for the first wms-site / wms-api events + SafetyViolations."

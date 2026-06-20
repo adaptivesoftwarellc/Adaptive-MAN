@@ -1,6 +1,6 @@
 # Identity Rules
 
-Lifted verbatim from the SCH PostHog Phase 1 implementation. **Do not change without a privacy review** — these rules are how we keep PHI/PII out of `distinct_id`.
+Trace to the validated PostHog Phase 1 implementation. **Do not change without a privacy review** — these rules are how we keep PHI/PII out of `distinct_id`.
 
 ## `distinct_id` formats
 

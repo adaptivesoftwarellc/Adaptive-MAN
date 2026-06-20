@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mockErrors, mockEvents, mockSessions } from './mock';
 import { errorCategory } from './catalog';
 
-const base = { app: 'sch-ui', env: 'Production' };
+const base = { app: 'wms-site', env: 'Production' };
 
 describe('mockErrors', () => {
   it('filters to a single category and the rows derive to that category', () => {

@@ -4,7 +4,7 @@ namespace Observability.Api.Endpoints;
 
 /// <summary>
 /// Development-only smoke test endpoint. Mounted only when env=Development in Program.cs.
-/// Equivalent to SCH_API's /api/dev/posthog-test, renamed for the new platform.
+/// Exercises the ingest path end-to-end without a real tenant.
 /// </summary>
 public static class DevEndpoints
 {

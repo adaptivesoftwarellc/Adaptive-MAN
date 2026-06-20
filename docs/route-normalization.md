@@ -1,8 +1,8 @@
 # Route Normalization
 
-Spec for SDKs (FE + BE). Mirrors the rules already in `sch-ui/src/utils/routeUtils.ts` and `SCH.Infrastructure/Services/Analytics/AnalyticsIdentity.cs`.
+Spec for SDKs (FE + BE). The threshold tuning was originally validated against real PostHog Phase 1 traffic and is shipped in the SDKs' `route.ts` / `RouteNormalizer.cs`.
 
-> **Port verbatim.** The threshold tuning has already been validated against real SCH traffic. Do not retune without rerunning the SCH route fixture set.
+> **Stable by design.** Do not retune without rerunning the route fixture regression corpus (see Test fixtures below).
 
 ## Frontend — `normalized_route`
 
@@ -73,4 +73,4 @@ Used for `api_request_failed`, `server_error_occurred`. Coarser than the FE `nor
 
 ## Test fixtures
 
-Both SDKs must include the SCH route fixture set as a regression test corpus. Add new fixtures whenever a new app onboards.
+Both SDKs must include a route fixture set as a regression test corpus. The JS SDK ships the WMS route fixtures (`packages/observability-client-js/src/__tests__/wms-fixtures/`, exercised by `wmsParity.test.ts`). Add new fixtures whenever a new app onboards.

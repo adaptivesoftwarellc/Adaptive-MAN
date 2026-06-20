@@ -1,8 +1,8 @@
 # Runbook — adaptive-observability platform outage
 
-First-response steps when the platform is unreachable or burning error budget. Triggered by the Azure Monitor availability alert (see [`../slo.md`](../slo.md) §2). Primary symptom: a **fast-burn** alert on `obs-api-prod-health`, or SCH reporting that telemetry stopped flowing.
+First-response steps when the platform is unreachable or burning error budget. Triggered by the Azure Monitor availability alert (see [`../slo.md`](../slo.md) §2). Primary symptom: a **fast-burn** alert on `obs-api-prod-health`, or an onboarded app (WMS) reporting that telemetry stopped flowing.
 
-**Scope:** `obs-api-prod` (and `obs-api-dev` for early warning). The SDK is fire-and-forget, so an ingest outage is **silent to SCH end users** — no app errors, just missing data. Speed matters: data emitted during the outage is lost, not queued.
+**Scope:** `obs-api-prod` (and `obs-api-dev` for early warning). The SDK is fire-and-forget, so an ingest outage is **silent to the onboarded app's end users** — no app errors, just missing data. Speed matters: data emitted during the outage is lost, not queued.
 
 **On-call escalation contact:** Brandon.
 
@@ -76,7 +76,7 @@ If `/health` is still not 200 after the restart, **escalate to Brandon** with:
 - Whether a deploy preceded the outage (rollback candidate).
 - Azure status-page findings (regional incident y/n).
 
-While escalated: note the outage start time for the error-budget ledger ([`../slo.md`](../slo.md) §4), and if it's a regional Azure incident, there's no local fix — monitor and communicate to SCH that telemetry is paused.
+While escalated: note the outage start time for the error-budget ledger ([`../slo.md`](../slo.md) §4), and if it's a regional Azure incident, there's no local fix — monitor and communicate to the onboarded app teams (WMS) that telemetry is paused.
 
 ---
 

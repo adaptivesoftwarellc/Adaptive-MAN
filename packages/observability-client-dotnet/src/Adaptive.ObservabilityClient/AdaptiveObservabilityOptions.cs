@@ -1,7 +1,7 @@
 namespace Adaptive.ObservabilityClient;
 
 /// <summary>
-/// Mirrors SCH's existing <c>AnalyticsOptions</c> shape so a port is a config-section rename.
+/// Follows the PostHog Phase 1 <c>AnalyticsOptions</c> shape so adopting from PostHog is a config-section rename.
 /// </summary>
 public sealed class AdaptiveObservabilityOptions
 {

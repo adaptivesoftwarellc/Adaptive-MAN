@@ -4,13 +4,13 @@
 
 `adaptive-observability` is an internal platform that ingests safe events and errors from onboarded apps' frontend and backend SDKs, persists them in Azure SQL, and surfaces them in a React admin dashboard.
 
-It replaces an already-shipped PostHog Phase 1 integration in SCH. Contracts (event names, identity rules, allowed property shapes, route normalization) are preserved verbatim from `POSTHOG_EVENT_CATALOG.md` so SCH migration is mechanical.
+Its first tenant is the Wound Management System (WMSSite + WMSAPI), which instruments net-new against the SDKs. Contracts (event names, identity rules, allowed property shapes, route normalization) trace their shape to the original `POSTHOG_EVENT_CATALOG.md`, which keeps onboarding mechanical and consistent across tenants.
 
 ## Components
 
 ```mermaid
 flowchart TD
-    A[Onboarded apps<br/>SCH_UI, SCH_API, SecondApp_UI, SecondApp_API]
+    A[Onboarded apps<br/>WMSSite, WMSAPI, future internal apps]
     A -->|"observability-client-js"| B[Observability API]
     A -->|"observability-client-dotnet"| B
     B --> C[(Azure SQL)]
@@ -52,12 +52,12 @@ flowchart TD
 
 Managed identity per App Service, scoped read on its same-environment Key Vault.
 
-## Migration from PostHog (summary)
+## Tenant onboarding (WMS — Phase 7)
 
-- SCH_API DI registration swaps `PostHogService` → `AdaptiveObservabilityService` (both implement `IAnalyticsService`).
-- SCH_UI swaps `posthog.*` calls in `analytics.ts` for `observability-client-js` calls. API surfaces match.
-- 5-business-day dual-write window in UAT validates parity.
-- See `docs/migration/posthog-to-adaptive.md` (Phase 6).
+- WMS is greenfield for telemetry — no PostHog/analytics package to remove; every touch point is an **add** (see `docs/audits/wmssite.md`, `docs/audits/wmsapi.md`).
+- WMSAPI: `services.AddAdaptiveObservability(...)` in `Program.cs`; net-new global-exception + correlation-ID middleware; emit `server_error_occurred` / `background_job_failed`.
+- WMSSite: thin `services/analytics.js` wrapper over `observability-client-js`; `init(...)` at boot; a `RouteTracker` calling `capturePageView` on route change.
+- Onboard app rows + keys via `scripts/onboard-wms.ps1`, then watch `obs-api-dev` for the first events + `SafetyViolations`.
 
 ## Session timeline (Phase 5)
 
@@ -187,8 +187,8 @@ own ingest API, so the platform's own unhandled server errors become telemetry u
 `adaptive-observability-meta` app. This gives the SDK + ingest path a continuous live regression
 signal that costs nothing to keep running.
 
-**Emission point.** `ServerErrorTelemetryMiddleware` (the platform's own `GlobalExceptionMiddleware`,
-ported in shape from SCH_API) wraps the request pipeline just inside `CorrelationIdMiddleware`. On an
+**Emission point.** `ServerErrorTelemetryMiddleware` (the platform's own `GlobalExceptionMiddleware`)
+wraps the request pipeline just inside `CorrelationIdMiddleware`. On an
 unhandled exception it emits one `server_error_occurred` through the registered `IAnalyticsService`,
 then re-throws so the normal 500 response is unchanged. Only the catalog-allowed fields leave the
 process — `exception_type`, `endpoint_group`, `http_status_code`, `correlation_id` (and `release_sha`,

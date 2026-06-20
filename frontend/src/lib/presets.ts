@@ -3,8 +3,8 @@
  * with a curated app + env + range filter applied via the URL.
  *
  * Two sources:
- *  - `builtin`  — curated "Quick views", shipped with the app (originally mirroring the SCH
- *                 PostHog onboarding dashboards, Phase 6.9). Not user-editable.
+ *  - `builtin`  — curated "Quick views", shipped with the app (mirroring the WMS
+ *                 onboarding dashboards, Phase 7). Not user-editable.
  *  - `user`     — "My views", created and removed by the user, persisted in localStorage.
  *
  * The Sidebar reads `builtinViews` plus `loadUserViews()` and renders them in their own
@@ -31,13 +31,13 @@ export interface DashboardView {
 
 /** Curated, read-only shortcuts. */
 export const builtinViews: DashboardView[] = [
-  // SCH onboarding views — Phase 6.9
-  { id: 'sch-ui-prod-health',  label: 'SCH UI · Prod health',  page: 'health', app: 'sch-ui',  env: 'Production',  range: '24h', source: 'builtin' },
-  { id: 'sch-ui-dev-health',   label: 'SCH UI · Dev health',   page: 'health', app: 'sch-ui',  env: 'Development', range: '24h', source: 'builtin' },
-  { id: 'sch-api-prod-health', label: 'SCH API · Prod health', page: 'health', app: 'sch-api', env: 'Production',  range: '24h', source: 'builtin' },
-  { id: 'sch-api-dev-health',  label: 'SCH API · Dev health',  page: 'health', app: 'sch-api', env: 'Development', range: '24h', source: 'builtin' },
-  { id: 'sch-ui-errors',       label: 'SCH UI · Errors (7d)',  page: 'errors', app: 'sch-ui',  env: 'Production',  range: '7d',  source: 'builtin' },
-  { id: 'sch-api-errors',      label: 'SCH API · Errors (7d)', page: 'errors', app: 'sch-api', env: 'Production',  range: '7d',  source: 'builtin' },
+  // WMS onboarding views — Phase 7
+  { id: 'wms-site-prod-health', label: 'WMS Site · Prod health', page: 'health', app: 'wms-site', env: 'Production',  range: '24h', source: 'builtin' },
+  { id: 'wms-site-dev-health',  label: 'WMS Site · Dev health',  page: 'health', app: 'wms-site', env: 'Development', range: '24h', source: 'builtin' },
+  { id: 'wms-api-prod-health',  label: 'WMS API · Prod health',  page: 'health', app: 'wms-api',  env: 'Production',  range: '24h', source: 'builtin' },
+  { id: 'wms-api-dev-health',   label: 'WMS API · Dev health',   page: 'health', app: 'wms-api',  env: 'Development', range: '24h', source: 'builtin' },
+  { id: 'wms-site-errors',      label: 'WMS Site · Errors (7d)', page: 'errors', app: 'wms-site', env: 'Production',  range: '7d',  source: 'builtin' },
+  { id: 'wms-api-errors',       label: 'WMS API · Errors (7d)',  page: 'errors', app: 'wms-api',  env: 'Production',  range: '7d',  source: 'builtin' },
 ];
 
 /** Build the relative URL for a view, including query params. */

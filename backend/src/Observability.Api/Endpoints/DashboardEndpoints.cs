@@ -80,7 +80,7 @@ public static class DashboardEndpoints
     /// <summary>
     /// Issue 10.2 — the PHI allowlist canary writes to a dedicated <c>canary-test</c> app. Reading
     /// this id lets the dashboard namespace that app out so its rows never pollute a real tenant's
-    /// (e.g. SCH's) view. Empty/unset config means no canary app to hide.
+    /// (e.g. WMS's) view. Empty/unset config means no canary app to hide.
     /// </summary>
     private static Guid? CanaryAppId(IConfiguration config) =>
         Guid.TryParse(config["Observability:CanaryApplicationId"], out var id) ? id : null;
