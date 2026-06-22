@@ -28,8 +28,9 @@ Custom event ingestion · Custom error ingestion · Strict privacy allowlists ·
 | 5 — Session Timeline | **Hardened.** Sessions schema + ingest + derived timeline + cross-process correlation + UI shipped on `phase-5/session-timeline`. SDK auto-bracket gap closed via Issue 4.11. **5.7 landed (2026-05-22):** full 8-cell benchmark grid run before/after on local Docker MSSQL; `Phase5HardeningIndexes` additive migration ships `Events(ApplicationId, EnvironmentId, SessionId, OccurredAt)` + `Errors(ApplicationId, EnvironmentId, LastCorrelationId)`. p95 stays under 200ms through the 10k-events/session architecture-doc upper bound; 100k cell confirms the documented materialization boundary (see [`docs/perf.md`](docs/perf.md)). **4.11 live-ingest harness PASSED end-to-end against `obs-api-dev` (2026-05-22)** using a public key minted via the Phase 8.9 admin endpoints. Outstanding: 5.5 cross-process correlation verification owned by Phase 6.1; re-run grid against Azure SQL Dev (now unblocked — `ObservabilityDev` is live). |
 | 6 — SCH Onboarding | **Sessions A + B done; Session C (wall-clock soak + cutover) in flight.** Re-scoped 2026-04-30 (PostHog never merged; SCH onboards as a fresh integration). Soak shape (Option A, 2026-05-22): 5-business-day SCH Dev → `obs-api-dev` shakedown (no platform UAT env). **A: audits + publish pipeline shipped (2026-05-22).** **B: SDK integration merged (2026-05-24)** — SCH_UI on `feature/adaptive-observability` (analytics wrapper, routeUtils, RouteTracker, axios interceptor, identify on login, ErrorBoundary, `.env.example`, both Azure SWA workflows pass `VITE_OBSERVABILITY_*` + `VITE_RELEASE_SHA`, role-names audit doc); SCH_API on `feature/adaptive-observability` (`AddAdaptiveObservability(...)` DI, `AdaptiveObservability` config section, `GlobalExceptionMiddleware` emits `server_error_occurred` on 5xx, 8 BG services emit `background_job_failed`, dev-only test endpoints, `AnalyticsIdentity` helper). 6.9 dashboard preset merged (PR #15). 6.6 partly done (2026-05-25): app + env rows created via `scripts/onboard-sch.ps1`, 4 plaintext keys minted, ingestion smoke 4/4 green (sch-api + sch-ui Dev keys, events + errors paths, all 202 against `obs-api-dev`). **Session C remaining (as of 2026-05-25):** (a) Brandon sets four `AdaptiveObservability__*` App Service config values on the SCH_API Dev App Service (`ASPNETCORE_ENVIRONMENT=Dev` — not the literal "Development", so the App Service config path is the right one); (b) first real SCH-emitted event lands in `obs-api-dev` → Day 1 of the soak; (c) 5 business days zero `SafetyViolations` for `sch-ui` + `sch-api`; (d) 5.5 cross-process correlation trace (one request showing matching `correlation_id` on FE `api_request_failed` + BE `server_error_occurred`); (e) privacy reviewer sign-off committed in [`docs/migration/sch-dev-shakedown.md`](docs/migration/sch-dev-shakedown.md); (f) 6.8 Prod cutover after soak passes — Prod App Service config values wired by Brandon to `SHC-KV` or App Service config, Prod deploy with SDK, 1 week stable. **Adaptive-side blocker:** SCH_API Dev + Prod App Services aren't in `Adaptive Subscription` — Brandon owns the runtime config wiring. |
 | 7 — WMS Onboarding | **Audits landed; integration open.** Targets `WMSSite` (UI) + `WMSAPI` (backend), replacing the original `SecondApp_*` placeholders. 7.1 + 7.2 read-only audits shipped (`docs/audits/wmssite.md`, `wmsapi.md`); audit re-confirmed WMSAPI has no exception/correlation middleware (net-new infra) and that WMSAPI uses custom JWT (not MSAL — MSAL is WMSSite-only). 7.3–7.13 (decisions + integration) open. |
-| 8 – 9 | Open. Documented below. |
-| 10 — Platform Hardening (mission audit) | **In progress. Added 2026-06-01.** 11 issues surfaced by re-reading the platform mission (custom PostHog replacement, multi-app, strict PHI/PII, anti-lock-in). **Shipped:** 10.1/10.2/10.3 (code; post-merge ops pending), 10.11 (CODEOWNERS), **10.4 API versioning (#28), 10.5 bulk export (#29), 10.6 admin UI (`phase-10/6-admin-ui` — closes 8.7's read-only audit view).** **Open:** 10.7 compliance/DR runbook (DR drill is a 6.8 prereq), 10.8 dogfood SDK, 10.9 migration playbook, 10.10 SDK failure-mode docs. Four items (10.1, 10.2, 10.3, 10.11) are **pre-6.8 cutover gates**. |
+| 8 — Alerts, Grouping & Prod Hardening | **Largely done.** Shipped: 8.1 fingerprint hardening (#32), 8.2 BG dedup hardening (#32), 8.3 alert rule engine (#35, visibility-only until 8.4), 8.5 retention (#32), 8.6 RBAC local-users (#33), 8.7 audit logging (#26 + 10.6 UI), 8.8 rate/payload limits (PR A2), 8.9 admin provisioning. **Open (Brandon/scale):** 8.4 notifications (ACS-vs-SendGrid decision + resource), 8.10 index review (needs Prod traffic), 8.11 key-rotation drill (Azure access), 8.12 ingestion queue (scale-gated). |
+| 9 — Session Replay (rrweb) | **Open.** Blocked on the rrweb dependency-approval gate + masking sign-off. Not started. |
+| 10 — Platform Hardening (mission audit) | **Mostly shipped.** 11 issues from the 2026-06-01 mission audit. **Shipped:** 10.1/10.2/10.3 (code; post-merge ops pending), 10.11 (CODEOWNERS file; branch protection pending repo admin), 10.4 API versioning (#28), 10.5 bulk export (#29), 10.6 admin UI (#34 — closes 8.7's read-only audit view), **10.8 dogfood SDK Dev side (#36), 10.9 migration playbook (#31), 10.10 SDK failure-mode docs (#31), 10.7 compliance docs (#31).** **Open (Brandon/Azure):** 10.7 DR drill + `disaster-recovery.md` (6.8 prereq), 10.8 Prod meta-app self-registration (first Prod deploy). Four items (10.1, 10.2, 10.3, 10.11) are **pre-6.8 cutover gates** (code landed; post-merge ops outstanding). |
 
 ## Constraints
 
@@ -645,23 +646,26 @@ These differences from SCH (JS not TS, MSAL not custom JWT, no exception middlew
 
 ### Issue 8.1 — Error fingerprinting (server-side hardening)
 **Description:** Already present in 1.5; this hardens it (collision behavior, fingerprint version field).
+**Status:** ✅ Shipped (#32, `7617db1`). `FingerprintVersion` + `ErrorFingerprint.CurrentVersion`; `POST /api/admin/fingerprints/backfill` re-stamps + merges; algorithm documented in `docs/architecture.md`.
 **Acceptance criteria:**
-- [ ] Fingerprint version stored on `Errors`
-- [ ] Backfill job for past data
-- [ ] Algorithm documented
+- [x] Fingerprint version stored on `Errors`
+- [x] Backfill job for past data
+- [x] Algorithm documented
 
 ### Issue 8.2 — BG job failure dedup hardening
 **Description:** Already present in 4.8; this hardens (per-app override, audit of suppressed-vs-incident counts).
+**Status:** ✅ Shipped (#32, `16d9223`).
 **Acceptance criteria:**
-- [ ] Per-app window override
-- [ ] Suppressed counts visible in dashboard
+- [x] Per-app window override
+- [x] Suppressed counts visible in dashboard
 
 ### Issue 8.3 — Alert rule engine
 **Description:** Configurable rules.
+**Status:** ✅ Shipped (#35, `be8b05a` + `47310d8`). Visibility-only until 8.4 notifications; `FiredAlerts` surfaced via `GET /api/dashboard/alerts` + Alerts page. See `docs/architecture.md`.
 **Acceptance criteria:**
-- [ ] `AlertRules` table
-- [ ] Types: count-over-window, new-error-after-release, error-rate-above-threshold, any-prod-job-failure
-- [ ] Evaluator runs as `Worker` service
+- [x] `AlertRules` table
+- [x] Types: count-over-window, new-error-after-release, error-rate-above-threshold, any-prod-job-failure
+- [x] Evaluator runs as `Worker` service
 
 ### Issue 8.4 — Notifications (email + Teams)
 **Description:** Fire alerts to email + Microsoft Teams webhooks.
@@ -674,11 +678,12 @@ These differences from SCH (JS not TS, MSAL not custom JWT, no exception middlew
 
 ### Issue 8.5 — Retention policies
 **Description:** Per-app retention with scheduled archive/delete. Replay retention is defined here but enforced once Phase 9 ships.
+**Status:** ✅ Shipped (#32, `f56179b`). `RetentionSweepService` (Worker) + `IRetentionSweeper`; per-env overrides; `admin.retention.swept` audit row per run. See `docs/architecture.md`.
 **Acceptance criteria:**
-- [ ] Per-app setting (default 90d events, 180d errors, **14d replay** when Phase 9 lands)
-- [ ] Worker runs nightly
-- [ ] Audit log row per run
-- [ ] Schema reserves a `ReplayRetentionDays` column on `AppEnvironments` (nullable until Phase 9)
+- [x] Per-app setting (default 90d events, 180d errors; **14d replay** reserved for Phase 9)
+- [x] Worker runs nightly
+- [x] Audit log row per run
+- [x] Schema reserves a `ReplayRetentionDays` column on `AppEnvironments` (nullable until Phase 9)
 
 ### Issue 8.9 — Admin app/key provisioning endpoint
 
@@ -989,13 +994,14 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Description:** PHI/PII storage requires documented compliance posture and a tested disaster-recovery plan. The plan today mentions a "privacy reviewer sign-off" gate but doesn't enumerate what they're signing off on, and "automated backups exist" is not the same as "we know we can restore."
 
 **Acceptance criteria:**
-- [ ] `docs/compliance.md` documents:
+**Status:** Docs portion ✅ shipped (#31). DR drill remains **Brandon-blocked** (needs Azure SQL access) — `docs/disaster-recovery.md` is a marked stub; this is a 6.8 cutover prerequisite.
+- [x] `docs/compliance.md` documents:
   - BAA with Microsoft (verified state + ticket/contract reference)
   - Azure SQL TDE / encryption-at-rest (verified default; document any deviation)
   - Azure Key Vault encryption-at-rest defaults
   - Network posture trade-off (public + firewall vs. private endpoint — current decision and rationale)
-  - Audit log retention duration (`AuditLogs` table — defined here, enforced by 8.5 retention job when it lands)
-- [ ] `docs/disaster-recovery.md` documents:
+  - Audit log retention duration (`AuditLogs` table — defined here, enforced by 8.5 retention job, now shipped)
+- [ ] `docs/disaster-recovery.md` documents (**Brandon — Azure SQL access**):
   - Azure SQL PITR retention (default 7 days; document if LTR is needed)
   - Restore procedure step-by-step against `obs-api-dev` first
   - One drill executed and recorded with date + result (must be done before 6.8)
@@ -1018,27 +1024,29 @@ A small admin-provisioning endpoint removes the SQL-hand-seed dependency for eve
 **Description:** Today migrations apply on startup via `MigrateAsync` (Phase 2.4 cutover). All migrations so far are additive (new columns, new indexes), so the startup-apply pattern is safe. The first non-additive migration (column drop, rename, type change) will need a documented playbook — otherwise "deploy → app starts → ALTER TABLE → app reads new shape" is risky against live Prod traffic.
 
 **Acceptance criteria:**
-- [ ] `docs/database-migrations.md` documents:
+**Status:** ✅ Shipped (#31). Optional CI lint documented as deferred in `docs/database-migrations.md`.
+- [x] `docs/database-migrations.md` documents:
   - Classification: additive (safe at startup) vs. non-additive (expansion → contraction required)
   - Expansion/contraction pattern: add new column, dual-write, backfill, switch reads, drop old column (separate releases)
   - When a maintenance window is genuinely required vs. when expand/contract suffices
   - Rollback strategy: roll forward with a reversing migration rather than `Down`
-- [ ] PR template gains a "migration type" checkbox so reviewers see classification
-- [ ] (Optional) Lint that fails CI on migrations containing `DropColumn` / `RenameColumn` / `AlterColumn` without an "expand-contract: N of M" comment
+- [x] PR template gains a "migration type" checkbox so reviewers see classification
+- [ ] (Optional) Lint that fails CI on migrations containing `DropColumn` / `RenameColumn` / `AlterColumn` without an "expand-contract: N of M" comment — *deferred, documented*
 
 ### Issue 10.10 — SDK failure-mode documentation
 
 **Description:** SDK READMEs document the API surface but not what happens when ingestion is unreachable, slow, or returning 5xx. Operators of onboarded apps need to know whether to expect retries, dropped events, or buffered events, and how to detect the failure.
 
 **Acceptance criteria:**
-- [ ] `packages/observability-client-js/README.md` "Failure modes" section covers:
+**Status:** ✅ Shipped (#31). Doc constants verified against `transport.ts` + `AdaptiveObservabilityService.cs`. Optional `TransportStatus` callback documented as a future enhancement in both READMEs.
+- [x] `packages/observability-client-js/README.md` "Failure modes" section covers:
   - Network unreachable: batches retry with exponential backoff (current count + cap)
   - After N retries: events dropped silently (no localStorage queue; events lost on tab close while pending)
   - 4xx vs. 5xx response handling
   - Backpressure: batch buffer cap and overflow behavior
-- [ ] `packages/observability-client-dotnet/README.md` covers the equivalent .NET semantics (bounded `Channel<T>` queue, oldest dropped when full, no disk-backed persistence)
-- [ ] Each README has a "Troubleshooting: events don't appear" checklist
-- [ ] (Optional) Each SDK exposes a `TransportStatus` callback so host apps can detect ingestion outages and surface them in their own ops tooling
+- [x] `packages/observability-client-dotnet/README.md` covers the equivalent .NET semantics (bounded `Channel<T>` queue, oldest dropped when full, no disk-backed persistence)
+- [x] Each README has a "Troubleshooting: events don't appear" checklist
+- [ ] (Optional) Each SDK exposes a `TransportStatus` callback so host apps can detect ingestion outages and surface them in their own ops tooling — *deferred, documented*
 
 ### Issue 10.11 — CODEOWNERS for privacy + security files
 

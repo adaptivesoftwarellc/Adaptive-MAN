@@ -8,6 +8,12 @@ namespace Observability.Application.Retention;
 public interface IRetentionSweeper
 {
     Task<RetentionSweepResult> SweepAsync(CancellationToken ct);
+
+    /// <summary>
+    /// UTC timestamp of the most recent completed sweep (from the last <c>admin.retention.swept</c>
+    /// audit row), or null if none has run. Lets the host detect a missed daily run after a restart.
+    /// </summary>
+    Task<DateTime?> GetLastSweepAtUtcAsync(CancellationToken ct);
 }
 
 /// <param name="EventsDeleted">Total <c>Events</c> rows removed across all environments.</param>

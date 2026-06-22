@@ -63,4 +63,12 @@ public class AccessTokenServiceTests
         var act = () => new AccessTokenService(Options.Create(new AccessTokenOptions { SigningKey = "" }));
         act.Should().Throw<InvalidOperationException>();
     }
+
+    [Fact]
+    public void Constructor_ThrowsWhenSigningKeyTooShort()
+    {
+        // HMAC-SHA256 needs >= 32 bytes of key material; a short prod key must fail fast, not be accepted.
+        var act = () => new AccessTokenService(Options.Create(new AccessTokenOptions { SigningKey = "too-short-key" }));
+        act.Should().Throw<InvalidOperationException>();
+    }
 }
