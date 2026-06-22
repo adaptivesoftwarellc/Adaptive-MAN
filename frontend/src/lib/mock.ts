@@ -136,17 +136,17 @@ export function mockApps(): AppDto[] {
   ];
   return [
     {
-      id: 'sch-ui',
-      slug: 'sch-ui',
-      name: 'SCH UI',
-      description: 'Patient-facing scheduling web app (React).',
+      id: 'wms-site',
+      slug: 'wms-site',
+      name: 'WMS Site',
+      description: 'Wound-management intake & IVR web app (React + Vite).',
       environments: envs,
     },
     {
-      id: 'sch-api',
-      slug: 'sch-api',
-      name: 'SCH API',
-      description: 'Scheduling backend service (ASP.NET Core).',
+      id: 'wms-api',
+      slug: 'wms-api',
+      name: 'WMS API',
+      description: 'Wound-management backend service (ASP.NET Core).',
       environments: envs,
     },
     {
@@ -685,7 +685,7 @@ export function mockTimeline(sessionId: string): TimelineDto {
   return {
     session: {
       session_id: sessionId,
-      application_id: 'sch-ui',
+      application_id: 'wms-site',
       environment_id: 'Production',
       distinct_id: `usr_${hex(makeRng(`${sessionId}:user`), 10)}`,
       started_at: started.toISOString(),

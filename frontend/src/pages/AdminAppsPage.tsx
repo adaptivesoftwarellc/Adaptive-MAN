@@ -130,10 +130,10 @@ function CreateAppModal({ onClose }: { onClose: () => void }) {
     <Modal header={<h2 className="text-base font-semibold text-slate-900">New app</h2>} onClose={onClose}>
       <div className="space-y-4 p-6">
         <Field label="Name">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="SCH UI" autoFocus />
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="WMS Site" autoFocus />
         </Field>
         <Field label="Slug" hint="Lowercase identifier used in API paths.">
-          <input className={`${inputCls} font-mono`} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="sch-ui" />
+          <input className={`${inputCls} font-mono`} value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="wms-site" />
         </Field>
         <Field label="Description" hint="Optional.">
           <input className={inputCls} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Patient-facing scheduling web app" />

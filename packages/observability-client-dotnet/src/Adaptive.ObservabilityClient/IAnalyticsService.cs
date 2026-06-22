@@ -1,9 +1,10 @@
 namespace Adaptive.ObservabilityClient;
 
 /// <summary>
-/// Migration seam for adopting the Adaptive Observability platform.
-/// Mirrors the contract from SCH_API's <c>SCH.Core.Interfaces.IAnalyticsService</c> verbatim
-/// so SCH (and similar callers) can swap implementations via DI without changing call sites.
+/// Adoption seam for the Adaptive Observability platform.
+/// Follows the PostHog Phase 1 analytics contract, so a caller already on PostHog can swap
+/// implementations via DI without changing call sites, and a greenfield tenant has a small
+/// stable interface to depend on.
 /// </summary>
 public interface IAnalyticsService
 {

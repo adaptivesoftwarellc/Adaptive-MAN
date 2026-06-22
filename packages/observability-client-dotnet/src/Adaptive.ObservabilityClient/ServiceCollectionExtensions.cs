@@ -8,7 +8,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Registers <see cref="AdaptiveObservabilityService"/> as the <see cref="IAnalyticsService"/>.
-    /// SCH-style migration: replace existing PostHog DI registration with this.
+    /// Migrating from PostHog: replace the existing PostHog DI registration with this. Greenfield: just add it.
     /// </summary>
     public static IServiceCollection AddAdaptiveObservability(
         this IServiceCollection services,

@@ -6,7 +6,7 @@ namespace Observability.Api.Middleware;
 /// Issue 10.8 dogfood — the platform's own <c>GlobalExceptionMiddleware</c>. Catches unhandled
 /// exceptions, emits a <c>server_error_occurred</c> error through the registered
 /// <see cref="IAnalyticsService"/> (the dogfood SDK, pointed at this same API), then re-throws so the
-/// normal 500 response path is unchanged. Ported in shape from SCH_API's middleware.
+/// normal 500 response path is unchanged.
 ///
 /// PII safety: only the catalog-allowed fields leave the process — <c>exception_type</c>,
 /// <c>endpoint_group</c>, <c>http_status_code</c>, <c>correlation_id</c>. Never the exception

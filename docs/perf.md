@@ -61,7 +61,7 @@ p50 / p95 / p99 are over n=50 measured iterations after 5 warmups.
 1. **The new `Events(SessionId, OccurredAt)` index converts the per-session scan from index-seek-then-key-lookup into a single index range scan.** This is the load-bearing change: at 1k target events over 100k filler, p95 dropped from 46ms to 18ms; at 10k target events over 1M filler, p95 dropped from 170ms to 129ms. The bigger the filler set relative to the target session, the bigger the win.
 2. **The new `Errors(LastCorrelationId)` index measurably helps when cross-process errors are present.** Compare the paired `0 / 5 000` rows at 10k events: p95 went from 313ms to 175ms — a 44% reduction, more than the no-cross-process row's 24% reduction. The Errors table is still small in these benches, so the win will grow once real onboarded apps produce sustained Errors volumes.
 3. **At 100k events/session, indexes can't beat data-return cost.** Even with the new indexes, p95 sits at ~1s because the query is materializing 100k ordered rows over the network. This is not an index problem — it's the boundary the architecture doc already calls out ("revisit when per-session entry counts push past ~10k"). The derived approach is not intended to cover this shape; if a real session ever approaches it, the fix is materialization or paginated timeline retrieval, not more indexes.
-4. **At 10k events/session — the architecture doc's stated upper bound for derived — p95 is now comfortably under 200ms with cross-process errors, and ~130ms without.** That's the operating envelope for SCH and WMS.
+4. **At 10k events/session — the architecture doc's stated upper bound for derived — p95 is now comfortably under 200ms with cross-process errors, and ~130ms without.** That's the operating envelope for WMS.
 5. **Local Docker MSSQL is optimistic vs. Azure SQL.** No network latency, no GP_S serverless cold-start, no shared-tenant noise. Re-run after Brandon provisions `ObservabilityDev` (Phase 2.4) before treating these numbers as production-representative.
 
 ## Indexes shipped (additive migration)
@@ -75,7 +75,7 @@ The `Initial` migration is untouched. The new indexes are additive and the migra
 
 ## Verdict
 
-**Derived approach holds for any realistic SCH or WMS session shape.** With `Phase5HardeningIndexes` applied, p95 stays under 200ms up to and including the architecture-doc upper bound of 10k events/session, even with thousands of cross-process error joins.
+**Derived approach holds for any realistic WMS session shape.** With `Phase5HardeningIndexes` applied, p95 stays under 200ms up to and including the architecture-doc upper bound of 10k events/session, even with thousands of cross-process error joins.
 
 The 100k events/session cells confirm the derived approach is not suitable past ~10k — but that boundary was already documented and is consistent with the architecture doc. If a real onboarded app sustains sessions approaching that shape, the right next step is materialization (`SessionEvents`) or paginated timeline retrieval — file a fresh issue rather than re-litigating index choices.
 

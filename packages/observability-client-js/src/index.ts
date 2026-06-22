@@ -1,7 +1,7 @@
 /**
  * Adaptive Observability frontend SDK.
- * Mirrors the public surface of sch-ui/src/services/analytics.ts so PostHog migration
- * is import-line + DI swap only.
+ * Public surface follows the PostHog Phase 1 contract, so migrating off PostHog is
+ * import-line + DI swap only and greenfield instrumentation stays small.
  */
 
 import type { EventName, PropsFor } from "./events.js";

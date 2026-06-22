@@ -2,7 +2,7 @@
 
 Service-level objectives for the observability platform, plus the external availability monitoring that measures them. Implements Issue **10.3** (a pre-cutover gate per [`pr-a2-cutover-gates.md`](work/pr-prompts/pr-a2-cutover-gates.md)). Outage response lives in [`runbooks/platform-outage.md`](runbooks/platform-outage.md).
 
-The platform is the custom PostHog replacement; SCH is the first onboarded tenant. These SLOs apply to the **Prod** environment (`obs-api-prod`); Dev (`obs-api-dev`) is monitored for early warning but is not held to the objective.
+WMS (WMSSite + WMSAPI) is the first onboarded tenant. These SLOs apply to the **Prod** environment (`obs-api-prod`); Dev (`obs-api-dev`) is monitored for early warning but is not held to the objective.
 
 ---
 
@@ -14,7 +14,7 @@ The platform is the custom PostHog replacement; SCH is the first onboarded tenan
 | **SLO-2** | Ingest write latency, p95 (time to persist an accepted event) | **< 200 ms** | rolling 30 days |
 | **SLO-3** | Error budget (the inverse of SLO-1) | ≤ **0.5%** unavailability = **~3h 39m / 30 days** | rolling 30 days |
 
-**Why these:** SCH apps emit telemetry over the ingest surface. If ingest is down, SCH loses observability data silently (fire-and-forget SDK). Availability of the *ingest* path is therefore the headline SLI — dashboard read availability is explicitly **not** an SLO at this stage (dashboard is internal-only and tolerant of brief outages).
+**Why these:** onboarded apps (WMS first) emit telemetry over the ingest surface. If ingest is down, those apps lose observability data silently (fire-and-forget SDK). Availability of the *ingest* path is therefore the headline SLI — dashboard read availability is explicitly **not** an SLO at this stage (dashboard is internal-only and tolerant of brief outages).
 
 `/health` is the probe target for availability (it exercises the App Service host); it does **not** measure SLO-2. Ingest latency (SLO-2) requires a server-side latency metric — see §5 (follow-up).
 

@@ -1,16 +1,23 @@
 # `adaptive-observability` — Development Plan
 
-> Internal analytics, error-tracking, and session-timeline platform. Replaces an already-shipped PostHog Phase 1 integration in SCH with a custom system that onboards multiple internal apps under strict PHI/PII rules.
+> Internal analytics, error-tracking, and session-timeline platform that onboards Adaptive's internal apps under strict PHI/PII rules. First tenant is the Wound Management System (WMSSite + WMSAPI); the event/identity/privacy contracts trace their shape to the original PostHog Phase 1 catalog.
+
+> **⚠ AMENDMENT — 2026-06-17: SCH dropped, WMS is the anchor tenant.** SCH is being removed
+> from our systems; the platform is **no longer wired into the SCH_API / SCH_UI repos**. This
+> supersedes the SCH-specific narrative throughout this doc. Concretely:
+> - The **6.7 soak → 6.8 cutover** chain and the PostHog→adaptive *migration* scope are **cancelled** — WMS is greenfield for telemetry and instruments **net-new** against the SDKs (nothing to "cut over" or dual-write).
+> - Forward integration work is **Phase 7 — WMS onboarding** (WMSSite + WMSAPI), specced in `docs/audits/wmssite.md` and `docs/audits/wmsapi.md`. App rows/keys are provisioned via `scripts/onboard-wms.ps1`.
+> - SCH references below this banner are **retained as historical record** of how the contracts and platform were designed; they are no longer live targets. Read them as lineage, not as work to do.
 
 > **TODO (blocked on repo admin):** Configure the `prod` **GitHub Environment** in repo Settings → Environments. Add required reviewers (Arlo at minimum; Brandon optional). Without this the `deploy-prod` job in `.github/workflows/backend.yml` will fail-closed on every push to main — the federated credential for `id-observability-prod` only trusts tokens whose OIDC subject includes `environment:prod`. Arlo doesn't have admin on `adaptivesoftwarellc/Adaptive-MAN` yet; waiting on Brandon to grant repo admin (or to do the env config himself). Once configured, the first Prod CI deploy completes the last Prod acceptance criterion in 2.4.
 
 ## Goal
 
-Build a standalone repo that ingests safe events/errors from frontend + backend SDKs, persists them in Azure SQL, surfaces them in a React admin dashboard, and supports per-app onboarding with environment-specific keys and allowlists. Migrate SCH off PostHog onto this platform without losing any signal already captured.
+Build a standalone repo that ingests safe events/errors from frontend + backend SDKs, persists them in Azure SQL, surfaces them in a React admin dashboard, and supports per-app onboarding with environment-specific keys and allowlists. Onboard Adaptive's internal apps — starting with WMS (WMSSite + WMSAPI) — under strict PHI/PII rules. *(Superseded 2026-06-17: the original goal named SCH/PostHog migration; see the amendment banner above.)*
 
 ## Scope (MVP)
 
-Custom event ingestion · Custom error ingestion · Strict privacy allowlists · App/environment registration · API keys · React dashboard · Session timeline · React frontend SDK · .NET backend SDK · Azure Key Vault integration · **SCH PostHog→adaptive-observability migration**.
+Custom event ingestion · Custom error ingestion · Strict privacy allowlists · App/environment registration · API keys · React dashboard · Session timeline · React frontend SDK · .NET backend SDK · Azure Key Vault integration · **WMS onboarding (WMSSite + WMSAPI), net-new instrumentation** *(replaces the cancelled SCH PostHog→adaptive migration scope — see amendment banner)*.
 
 **Deferred (post-MVP, planned):** visual session replay via **rrweb** — designed for in Phase 4 (SDK leaves a slot), implemented in **Phase 9**. Disabled by default; gated on a separate privacy review.
 

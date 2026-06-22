@@ -1,6 +1,6 @@
 # adaptive-observability
 
-Internal analytics, error-tracking, and session-timeline platform. Replaces the existing PostHog Phase 1 integration in SCH with a custom system that onboards multiple internal apps under strict PHI/PII rules.
+Internal analytics, error-tracking, and session-timeline platform that onboards Adaptive's internal apps under strict PHI/PII rules. First tenant is the Wound Management System (WMSSite + WMSAPI); the event/identity/privacy contracts trace their shape to the original PostHog Phase 1 catalog.
 
 ## Status
 

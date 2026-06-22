@@ -43,7 +43,7 @@ public static partial class RouteNormalizer
     public static string NormalizeFromContext(HttpContext ctx)
     {
         // Endpoint metadata for route templates is fragile across MVC/Minimal APIs;
-        // path-based normalization is the canonical fallback used by SCH today.
+        // path-based normalization is the canonical fallback.
         return Normalize(ctx.Request.Path.Value ?? "/");
     }
 

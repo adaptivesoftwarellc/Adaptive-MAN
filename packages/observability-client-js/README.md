@@ -2,7 +2,7 @@
 
 Frontend SDK for the Adaptive Observability platform.
 
-The public surface mirrors `sch-ui/src/services/analytics.ts` so the SCH PostHog → Adaptive cutover (Phase 6) is import-line + DI-swap only.
+The public surface follows the PostHog Phase 1 contract (`POSTHOG_EVENT_CATALOG.md`), so an app migrating off PostHog can do so import-line + DI-swap only, and a greenfield tenant (e.g. WMSSite) gets a small, stable API to instrument against.
 
 ## Install
 
@@ -116,7 +116,7 @@ Work down this checklist:
 
 ## PostHog migration cheatsheet
 
-| PostHog (current SCH) | Adaptive (this SDK) |
+| PostHog | Adaptive (this SDK) |
 |---|---|
 | `posthog.init(key, { api_host })` | `observability.init({ ingestUrl, apiKey })` |
 | `posthog.identify(String(userId))` | `observability.identify(String(userId))` |

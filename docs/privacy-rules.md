@@ -2,9 +2,9 @@
 
 This platform ingests telemetry from PHI/PII-bearing applications. The rules here are **enforced server-side at ingestion**. Unsafe fields are *rejected and logged* in `SafetyViolations` — never silently dropped.
 
-These lists are ported verbatim from the validated PostHog Phase 1 work in SCH. They have already passed prior internal review.
+These lists trace to the validated PostHog Phase 1 work and have already passed prior internal review.
 
-> **Compliance sign-off TODO:** confirm whether these lists have explicit compliance/legal sign-off. If yes, reference the ticket here. If no, gate Phase 6 SCH cutover on it.
+> **Compliance sign-off TODO:** confirm whether these lists have explicit compliance/legal sign-off. If yes, reference the ticket here. If no, gate WMS go-live (and the first Prod deploy) on it.
 
 ## Never store
 

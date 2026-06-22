@@ -1,7 +1,7 @@
 {
   "name": "@adaptivesoftwarellc/observability-client-js",
   "version": "0.2.0",
-  "description": "Adaptive Observability frontend SDK. API surface mirrors SCH's analytics.ts so PostHog migration is import-line-only.",
+  "description": "Adaptive Observability frontend SDK. API surface follows the PostHog Phase 1 contract, so migrating off PostHog is import-line-only and greenfield instrumentation stays small.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

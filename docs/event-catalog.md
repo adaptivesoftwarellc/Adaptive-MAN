@@ -1,6 +1,6 @@
 # Event Catalog
 
-Ported from `POSTHOG_EVENT_CATALOG.md` in the SCH repos. Event names, identity rules, and allowed property shapes are preserved verbatim so SCH migration is mechanical.
+Traces its shape to the original `POSTHOG_EVENT_CATALOG.md`. Event names, identity rules, and allowed property shapes are kept stable so onboarding is consistent across tenants (WMS is the first; see `docs/audits/`).
 
 > **Source-of-truth decision (TODO):** code (compile-time safety in SDKs) is the leading candidate, with this markdown generated from the code. Until that's wired, treat this file as canonical.
 
@@ -74,7 +74,7 @@ BG job catch-block emission. Server-side dedup applied (15–30 min cooldown per
 - **Forbidden:** `exception_message`, `stack_trace`
 
 ### `dev_smoke_test` (Development only)
-Replaces SCH's `posthog_test_event`. Compiled out of non-Development builds.
+Development-only smoke event for exercising the ingest path. Compiled out of non-Development builds.
 
 - **Required:** none
 - **Allowed:** `release_sha`
@@ -92,8 +92,8 @@ See [identity-rules.md](identity-rules.md). Summary:
 
 Not part of MVP. Listed for future catalog expansion:
 
-- **SCH_UI:** `order_created`, `order_submitted`, `report_generated`, `document_uploaded`
-- **SCH_API:** `order_state_changed`, `claim_submission_failed`, `external_api_error`
+- **WMSSite (example app-specific events):** `intake_created`, `ivr_submitted`, `eligibility_checked`, `report_generated`
+- **WMSAPI (example app-specific events):** `order_state_changed`, `prior_auth_failed`, `external_api_error`
 - 4xx tracking — explicitly out of scope for Phase 1.
 
 ## Format & validation

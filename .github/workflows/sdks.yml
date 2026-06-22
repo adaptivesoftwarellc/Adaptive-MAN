@@ -14,7 +14,6 @@ on:
 jobs:
   client-js:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('packages/observability-client-js/package.json') != '' }}
     defaults:
       run:
         working-directory: packages/observability-client-js
@@ -31,7 +30,6 @@ jobs:
 
   client-dotnet:
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('packages/observability-client-dotnet/*.sln') != '' }}
     defaults:
       run:
         working-directory: packages/observability-client-dotnet
