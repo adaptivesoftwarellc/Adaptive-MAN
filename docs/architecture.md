@@ -101,10 +101,18 @@ audit row.
 
 ## Retention (Issue 8.5)
 
-Telemetry is swept on a schedule by the `Observability.Worker` host (`RetentionSweepService`), which
-runs once daily at `Observability:Retention:DailyRunAtUtc` (default `03:00` UTC). The sweep logic is a
-scoped service, `IRetentionSweeper`, shared with the API's DI container so behavior is identical
-wherever it runs and it can be exercised directly in tests.
+Telemetry is swept on a schedule by `RetentionSweepService`, which runs once daily at
+`Observability:Retention:DailyRunAtUtc` (default `03:00` UTC). The sweep logic is a scoped service,
+`IRetentionSweeper`, shared with the host's DI container so behavior is identical wherever it runs
+and it can be exercised directly in tests.
+
+**Host.** The service lives in `Observability.Infrastructure.Hosting` and is registered via
+`AddObservabilityBackgroundServices()`. It runs in the **API process** (`Observability.Api`): CI
+deploys only the API, so hosting the sweep there is what makes it actually run in Azure. (The
+standalone `Observability.Worker` registers the same services and remains a valid host for running
+them on their own, but is not deployed by CI.) It self-gates on `Observability:Retention:Enabled`
+(**default `true`** — a compliance control; one short DB pass per day does not keep a serverless DB
+awake). Integration tests set it `false` so booting the API can't trigger a startup sweep mid-test.
 
 Each run, per environment:
 - `Events` older than `EventRetentionDays` (by `CreatedAt`) are deleted — per-env override, else the
@@ -153,10 +161,27 @@ write-path was already tenant-scoped from the resolved key.
 ## Alerting (Issue 8.3)
 
 A rule engine evaluates operator-authored `AlertRules` against telemetry and persists matches to
-`FiredAlerts`. It runs in the Worker as a `BackgroundService` (`AlertEvaluationService`) on a fixed
-interval (`Observability:Alerting:EvaluationIntervalSeconds`, default 60s), opening a DI scope per
-pass; the evaluation itself is the scoped `IAlertEvaluator` so it can be invoked directly in tests
-(mirrors the retention sweeper).
+`FiredAlerts`. It runs as a `BackgroundService` (`AlertEvaluationService`, in
+`Observability.Infrastructure.Hosting`, registered by `AddObservabilityBackgroundServices()` in the
+API process) on a fixed interval (`Observability:Alerting:EvaluationIntervalSeconds`, default 60s),
+opening a DI scope per pass; the evaluation itself is the scoped `IAlertEvaluator` so it can be
+invoked directly in tests (mirrors the retention sweeper).
+
+**Disabled by default.** It self-gates on `Observability:Alerting:Enabled`, which **defaults
+`false`**. The evaluator polls the DB every interval, which would keep a serverless (auto-pause)
+database awake 24/7 — and there is nothing to evaluate before a tenant is live. Enable it
+per-environment at go-live: see the go-live steps below.
+
+### Pre-go-live cost posture & go-live checklist
+
+Until a tenant's traffic is live, the platform is provisioned but idle, so it's tuned to cost almost
+nothing: both SQL DBs are serverless (`GP_S_Gen5_1`, min 0.5 vCore) with **auto-pause** on (dev and,
+pre-go-live, prod), and alert evaluation is off so nothing keeps a DB awake. When onboarding a tenant
+to **prod**, do both of these together:
+1. Turn the prod DB's auto-pause **off** so live ingest never eats a cold start:
+   `az sql db update -g AdaptiveTools -s adaptivetoolssql -n ObservabilityProd --auto-pause-delay -1`
+2. Enable alert evaluation on the prod API: set app setting `Observability__Alerting__Enabled=true`
+   on `obs-api-prod`.
 
 **Visibility-only.** Notifications (email/Teams) are deferred to 8.4, which is gated on the
 ACS-vs-SendGrid decision and a Brandon-adjacent webhook/ACS resource. Until then the engine only

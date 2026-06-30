@@ -1,18 +1,18 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Observability.Infrastructure;
-using Observability.Worker;
+using Observability.Infrastructure.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-// Phase 8.5 — nightly retention sweep. Shares the Infrastructure DI registrations (DbContext,
-// RetentionOptions, IRetentionSweeper) with the API so behavior is identical across hosts.
+// Shares the Infrastructure DI registrations (DbContext, RetentionOptions, IRetentionSweeper,
+// AlertEvaluatorOptions, IAlertEvaluator) with the API so behavior is identical across hosts.
 builder.Services.AddObservabilityInfrastructure(builder.Configuration);
-builder.Services.AddHostedService<RetentionSweepService>();
 
-// Phase 8.3 — alert rule engine. Evaluates AlertRules on an interval and persists fired alerts
-// (visibility-only until 8.4 notifications land).
-builder.Services.AddHostedService<AlertEvaluationService>();
+// Phase 8.5 nightly retention sweep + Phase 8.3 alert evaluator. These now also run in the API host
+// (the deployed process); the standalone Worker remains a valid host for running them on their own.
+// Each self-gates on its Enabled option.
+builder.Services.AddObservabilityBackgroundServices();
 
 var host = builder.Build();
 await host.RunAsync();
