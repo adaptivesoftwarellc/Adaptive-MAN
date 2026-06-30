@@ -39,8 +39,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${CANARY_KEY}" ]; then
-            echo "::error::Missing canary key secret for ${{ matrix.env }} — run scripts/provision-canary.ps1 and set repo secrets."
-            exit 1
+            echo "::warning::Canary key for ${{ matrix.env }} not set — skipping (run scripts/provision-canary.ps1 and set CANARY_KEY_${{ matrix.env == 'dev' && 'DEV' || 'PROD' }} to enable). This is NOT a regression, just an unprovisioned canary."
+            exit 0
           fi
 
           # A forbidden PHI field (email) on an otherwise-valid event MUST be rejected with 422.
@@ -71,12 +71,14 @@ jobs:
         run: |
           title="[canary] PHI allowlist regression on ${{ matrix.env }}"
           # Avoid duplicate spam: only file if no open issue with this title exists.
-          existing=$(gh issue list --state open --search "in:title $title" --json number --jq 'length')
+          # -R is required because this step has no checkout, so gh can't infer the repo from git.
+          existing=$(gh issue list -R "${{ github.repository }}" --state open --search "in:title $title" --json number --jq 'length')
           if [ "${existing}" != "0" ]; then
             echo "An open issue already tracks this regression; not filing a duplicate."
             exit 0
           fi
           gh issue create \
+            -R "${{ github.repository }}" \
             --title "$title" \
             --label "canary,security" \
             --body "The PHI allowlist canary failed on **${{ matrix.env }}** (\`${{ matrix.base_url }}\`).
