@@ -52,6 +52,24 @@ public class IngestionEndpointsTests : IClassFixture<IngestionWebApplicationFact
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
+    [Fact]
+    public async Task Events_CorsPreflight_NeedsNoAuth_ReflectsOriginAndAllowsKeyHeader()
+    {
+        // A browser SDK (PublicClient key) preflights with OPTIONS and no API key. The ingest
+        // surface must answer 204, reflect the Origin, and allow the custom X-Observability-Key header.
+        var client = _factory.CreateClient();
+        var req = new HttpRequestMessage(HttpMethod.Options, "/api/ingest/events");
+        req.Headers.Add("Origin", "https://ivr.strategicsolutionsco.com");
+        req.Headers.Add("Access-Control-Request-Method", "POST");
+        req.Headers.Add("Access-Control-Request-Headers", "x-observability-key");
+
+        var response = await client.SendAsync(req);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        response.Headers.GetValues("Access-Control-Allow-Origin").Should().Contain("https://ivr.strategicsolutionsco.com");
+        response.Headers.GetValues("Access-Control-Allow-Headers").Should().ContainMatch("*X-Observability-Key*");
+    }
+
     [Theory]
     [InlineData("auth_login_success")]
     [InlineData("auth_logout")]

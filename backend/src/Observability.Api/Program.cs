@@ -85,18 +85,41 @@ app.UseWhen(isIngestPath, branch => branch.UseMiddleware<IngestPayloadLimitMiddl
 // activator, and SdkVersionMiddleware treats empty/unparseable as "no floor".
 app.UseWhen(isIngestPath, branch => branch.UseMiddleware<SdkVersionMiddleware>(minSdkVersion ?? string.Empty));
 
+// CORS for the ingest surface — applies in ALL environments. Browser SDKs send from an app origin
+// (e.g. https://ivr.strategicsolutionsco.com) using a PublicClient key, so the ingest endpoints must
+// answer CORS preflight and reflect the caller's Origin (and allow the custom X-Observability-Key
+// header). The API key is the security boundary here — not CORS; ingest is write-only and
+// fire-and-forget. Preflight (OPTIONS) carries no API key, so the app can't be resolved at that point;
+// reflecting Origin is the standard approach for key-authenticated public ingest. (AppEnvironment
+// .AllowedOriginsJson can tighten this per-app later, enforced on the keyed POST rather than preflight.)
+app.UseWhen(isIngestPath, branch => branch.Use(async (ctx, next) =>
+{
+    var origin = ctx.Request.Headers.Origin.ToString();
+    if (!string.IsNullOrEmpty(origin))
+    {
+        ctx.Response.Headers["Access-Control-Allow-Origin"] = origin;
+        ctx.Response.Headers.Append("Vary", "Origin");
+        ctx.Response.Headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+        ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, X-Observability-Key, X-Correlation-Id, X-Observability-SDK-Version";
+        ctx.Response.Headers["Access-Control-Max-Age"] = "600";
+    }
+    if (HttpMethods.IsOptions(ctx.Request.Method)) { ctx.Response.StatusCode = 204; return; }
+    await next();
+}));
+
 // CORS for the dashboard during local dev. Phase 8 RBAC will gate dashboard endpoints; until then
-// the dashboard is open within the trusted network.
+// the dashboard is open within the trusted network. Scoped to non-ingest so it doesn't override the
+// per-origin ingest policy above with a wildcard.
 if (app.Environment.IsDevelopment())
 {
-    app.Use(async (ctx, next) =>
+    app.UseWhen(ctx => !isIngestPath(ctx), branch => branch.Use(async (ctx, next) =>
     {
         ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
         ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Observability-Key, X-Observability-Admin-Key, X-Correlation-Id, X-Observability-SDK-Version";
         if (HttpMethods.IsOptions(ctx.Request.Method)) { ctx.Response.StatusCode = 204; return; }
         await next();
-    });
+    }));
 }
 
 app.MapHealthEndpoints();
