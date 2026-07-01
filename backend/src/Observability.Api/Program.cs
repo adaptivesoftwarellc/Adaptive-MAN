@@ -33,6 +33,13 @@ var maxIngestBodyBytes = builder.Configuration.GetValue<long?>("Observability:In
 // Issue 10.4 — optional floor for the SDK version header. Unset by default: log-only, no rejection.
 var minSdkVersion = builder.Configuration.GetValue<string?>("Observability:Sdk:MinVersion");
 
+// Dashboard CORS allowlist. The dashboard is served from a separate origin (an Azure Static Web App)
+// in deployed environments, so its authenticated browser calls to the dashboard/auth/admin surface
+// need CORS. Comma-separated; in Development any origin is reflected for local convenience.
+var dashboardAllowedOrigins = (builder.Configuration["Observability:Dashboard:AllowedOrigins"] ?? string.Empty)
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
 builder.Services.Configure<JsonOptions>(opts =>
 {
     opts.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
@@ -107,20 +114,30 @@ app.UseWhen(isIngestPath, branch => branch.Use(async (ctx, next) =>
     await next();
 }));
 
-// CORS for the dashboard during local dev. Phase 8 RBAC will gate dashboard endpoints; until then
-// the dashboard is open within the trusted network. Scoped to non-ingest so it doesn't override the
-// per-origin ingest policy above with a wildcard.
-if (app.Environment.IsDevelopment())
+// CORS for the dashboard (non-ingest surface). The dashboard runs from its own origin (a Static Web
+// App) in deployed environments, so its authenticated calls need CORS. In Development any origin is
+// reflected for local convenience; elsewhere only origins in Observability:Dashboard:AllowedOrigins.
+// Auth rides in the bearer/admin-key headers (not cookies), so credentialed CORS isn't needed — the
+// specific origin is echoed rather than a wildcard. Scoped to non-ingest so it doesn't override the
+// per-origin ingest policy above.
+app.UseWhen(ctx => !isIngestPath(ctx), branch => branch.Use(async (ctx, next) =>
 {
-    app.UseWhen(ctx => !isIngestPath(ctx), branch => branch.Use(async (ctx, next) =>
+    var origin = ctx.Request.Headers.Origin.ToString();
+    var originAllowed = !string.IsNullOrEmpty(origin)
+        && (app.Environment.IsDevelopment() || dashboardAllowedOrigins.Contains(origin));
+    if (originAllowed)
     {
-        ctx.Response.Headers["Access-Control-Allow-Origin"] = "*";
-        ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
+        ctx.Response.Headers["Access-Control-Allow-Origin"] = origin;
+        ctx.Response.Headers.Append("Vary", "Origin");
+        ctx.Response.Headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
         ctx.Response.Headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Observability-Key, X-Observability-Admin-Key, X-Correlation-Id, X-Observability-SDK-Version";
-        if (HttpMethods.IsOptions(ctx.Request.Method)) { ctx.Response.StatusCode = 204; return; }
-        await next();
-    }));
-}
+        ctx.Response.Headers["Access-Control-Max-Age"] = "600";
+    }
+    // Answer preflight regardless: a disallowed origin simply gets a 204 without the ACAO header,
+    // which the browser then blocks — the correct outcome.
+    if (HttpMethods.IsOptions(ctx.Request.Method)) { ctx.Response.StatusCode = 204; return; }
+    await next();
+}));
 
 app.MapHealthEndpoints();
 app.MapAuthEndpoints();
