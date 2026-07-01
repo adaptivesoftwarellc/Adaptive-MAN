@@ -4,17 +4,20 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Observability.Application.Retention;
 
-namespace Observability.Worker;
+namespace Observability.Infrastructure.Hosting;
 
 /// <summary>
 /// Runs the retention sweep once per day at <c>RetentionOptions.DailyRunAtUtc</c> (Issue 8.5). The
 /// sweep itself is a scoped service (<see cref="IRetentionSweeper"/>); this host just schedules it,
-/// opens a DI scope per run, and keeps the loop alive across transient failures.
+/// opens a DI scope per run, and keeps the loop alive across transient failures. Hosted by whichever
+/// process registers <c>AddObservabilityBackgroundServices</c> (the API in deployment; also the Worker).
+/// No-op when <c>RetentionOptions.Enabled</c> is false.
 /// </summary>
 public sealed class RetentionSweepService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<RetentionSweepService> _logger;
+    private readonly bool _enabled;
     private readonly TimeSpan _runAtUtc;
 
     public RetentionSweepService(
@@ -24,11 +27,18 @@ public sealed class RetentionSweepService : BackgroundService
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
+        _enabled = options.Value.Enabled;
         _runAtUtc = TimeSpan.TryParse(options.Value.DailyRunAtUtc, out var t) ? t : new TimeSpan(3, 0, 0);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (!_enabled)
+        {
+            _logger.LogInformation("Retention sweep is disabled (Observability:Retention:Enabled=false); not scheduling.");
+            return;
+        }
+
         // Catch up on a missed run: if today's scheduled slot already passed and no sweep has run since
         // then, a restart after the daily time would otherwise skip the day entirely. Run once now.
         if (await ShouldCatchUpAsync(DateTime.UtcNow, stoppingToken))

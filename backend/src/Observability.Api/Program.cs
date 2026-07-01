@@ -9,6 +9,7 @@ using Observability.Api.Middleware;
 using Observability.Domain.Identity;
 using Observability.Infrastructure;
 using Observability.Infrastructure.Authentication;
+using Observability.Infrastructure.Hosting;
 using Observability.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -16,6 +17,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.AddKeyVaultIfConfigured();
 
 builder.Services.AddObservabilityInfrastructure(builder.Configuration);
+
+// Phase 8 background hosts — nightly retention sweep (8.5) and alert evaluator (8.3) now run in the
+// API process. The dedicated Worker is not deployed by CI; folding them in ensures they actually run.
+// Each self-gates on its Enabled option: retention defaults on (cheap, compliance), alerting defaults
+// off (it polls the DB and would defeat serverless auto-pause until a tenant is live).
+builder.Services.AddObservabilityBackgroundServices();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddObservabilityRateLimiting(builder.Configuration);
