@@ -119,14 +119,20 @@ public sealed class AdaptiveObservabilityService : IAnalyticsService, IAsyncDisp
     public async Task ShutdownAsync(CancellationToken cancellationToken = default)
     {
         _channel.Writer.TryComplete();
-        using var combined = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
         try
         {
+            // Creating the linked source reads _cts.Token, which throws ObjectDisposedException if
+            // DisposeAsync already disposed _cts. That happens under a benign shutdown race: the host's
+            // StopAsync can call ShutdownAsync after DI disposal has raced ahead and disposed the
+            // service. There's nothing left to drain in that case, so treat it like a normal cancel
+            // rather than letting it bubble out of host shutdown (which fails WebApplicationFactory
+            // teardown and, in turn, every test in the class).
+            using var combined = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
             await _drainTask.WaitAsync(_options.ShutdownTimeout, combined.Token).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException)
+        catch (Exception ex) when (ex is TimeoutException or OperationCanceledException or ObjectDisposedException)
         {
-            _logger.LogDebug("AdaptiveObservability shutdown drain timeout/cancel");
+            _logger.LogDebug(ex, "AdaptiveObservability shutdown drain ended early (timeout/cancel/disposed)");
         }
     }
 
