@@ -9,6 +9,13 @@ public sealed class RetentionOptions
 {
     public const string SectionName = "Observability:Retention";
 
+    /// <summary>
+    /// Whether the nightly retention sweep host runs. Defaults to <c>true</c>: retention is a
+    /// compliance control (PHI age caps) and is cheap — one short DB pass per day, which does not
+    /// keep a serverless DB awake. Disabled in integration tests for determinism.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>Default age cap for <c>Events</c> rows, by <c>CreatedAt</c>.</summary>
     public int EventRetentionDays { get; set; } = 90;
 

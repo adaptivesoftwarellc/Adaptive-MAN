@@ -50,6 +50,10 @@ public class IngestionWebApplicationFactory : WebApplicationFactory<Program>
                 // Issue 10.8 — keep the dogfood SDK inert by default so tests don't attempt self-ingest
                 // over HTTP. The dogfood test overrides this and supplies a recording IAnalyticsService.
                 ["AdaptiveObservability:Enabled"] = "false",
+                // Booting the API host also starts the background hosts (retention sweep, alert
+                // evaluator). Keep both off so they can't run a startup sweep or DB poll mid-test.
+                ["Observability:Retention:Enabled"] = "false",
+                ["Observability:Alerting:Enabled"] = "false",
             });
         });
 
