@@ -142,6 +142,17 @@ public static class DashboardEndpoints
 
         long Count(string name) => byEvent.FirstOrDefault(x => x.name == name)?.count ?? 0L;
 
+        // Error-category cards come from the Errors table, not Events: server_error_occurred /
+        // frontend_exception / background_job_failed are persisted as Errors (see IngestionService).
+        // Sum OccurrenceCount for total occurrences, matching GetErrors' categorization and the
+        // errors_by_release / top_failing_endpoint_groups breakdowns below.
+        long errBackend500 = await errors.Where(e => e.ExceptionType != null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+        long errBackgroundJobs = await errors.Where(e => e.ExceptionType == null && e.JobName != null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+        long errFrontend = await errors.Where(e => e.ExceptionType == null && e.JobName == null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+
         var pageViewsByFeature = await events
             .Where(e => e.EventName == "page_viewed" && e.FeatureArea != null)
             .GroupBy(e => e.FeatureArea!)
@@ -190,10 +201,10 @@ public static class DashboardEndpoints
             range = new { from = range.From, to = range.To },
             cards = new
             {
-                backend_500s = Count("server_error_occurred"),
-                frontend_exceptions = Count("frontend_exception"),
+                backend_500s = errBackend500,
+                frontend_exceptions = errFrontend,
                 api_request_failures = Count("api_request_failed"),
-                background_job_failures = Count("background_job_failed"),
+                background_job_failures = errBackgroundJobs,
                 page_views = Count("page_viewed"),
                 logins = Count("auth_login_success"),
             },
