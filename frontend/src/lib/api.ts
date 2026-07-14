@@ -133,14 +133,59 @@ export interface SparklinePoint {
   c: number;
 }
 
+/**
+ * Previous-window counts exist only for EVENT-based cards: error cards read the deduplicated
+ * Errors table (lifetime OccurrenceCount, single LastSeenAt), which cannot be windowed honestly.
+ */
+export interface HealthCardsPreviousDto {
+  api_request_failures: number;
+  page_views: number;
+  logins: number;
+}
+
 export interface HealthDto {
   range: { from: string; to: string };
   cards: HealthCardsDto;
+  /** Event-based cards over the immediately preceding window of equal length (for deltas). */
+  cards_previous?: HealthCardsPreviousDto;
   by_event: { name: string; count: number }[];
   page_views_by_feature: { feature: string; count: number }[];
   top_failing_endpoint_groups: { endpoint_group: string; occurrences: number }[];
   errors_by_release: { release: string; occurrences: number }[];
   sparklines: Record<string, SparklinePoint[]>;
+}
+
+// --- Insights Phase A (docs/product-analytics-plan.md) -----------------------
+
+export type TrendInterval = 'hour' | 'day' | 'week';
+export type TrendBreakdown = 'feature_area' | 'release_sha' | 'endpoint_group';
+export type TrendAgg = 'count' | 'unique_users';
+
+export interface TrendSeriesDto {
+  event: string;
+  breakdown: string | null;
+  total: number;
+  buckets: SparklinePoint[];
+}
+
+export interface TrendsDto {
+  range: { from: string; to: string; interval: TrendInterval };
+  agg: TrendAgg;
+  series: TrendSeriesDto[];
+}
+
+export interface TrendsQuery extends DashboardQuery {
+  events: string;
+  interval?: TrendInterval;
+  breakdown?: TrendBreakdown;
+  agg?: TrendAgg;
+}
+
+export interface AnnotationDto {
+  id: number;
+  at: string;
+  label: string;
+  release_sha: string | null;
 }
 
 export interface ErrorRowDto {
@@ -365,6 +410,14 @@ export const api = {
     USE_MOCKS
       ? delay(mock.mockAlerts(q))
       : request<PagedResult<AlertRowDto>>(`/api/dashboard/alerts${buildQuery(q as unknown as AnyQuery)}`),
+  trends: (q: TrendsQuery) =>
+    USE_MOCKS
+      ? delay(mock.mockTrends(q))
+      : request<TrendsDto>(`/api/dashboard/insights/trends${buildQuery(q as unknown as AnyQuery)}`),
+  annotations: (q: DashboardQuery) =>
+    USE_MOCKS
+      ? delay(mock.mockAnnotations(q))
+      : request<{ rows: AnnotationDto[] }>(`/api/dashboard/annotations${buildQuery(q as unknown as AnyQuery)}`).then((r) => r.rows),
 
   // --- Issue 10.6 admin surface (always RBAC/admin-key gated server-side) ---
   adminApps: () =>

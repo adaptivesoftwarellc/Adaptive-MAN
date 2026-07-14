@@ -37,6 +37,75 @@ public static class AdminEndpoints
         admin.MapGet("/users", ListUsers);
         admin.MapPost("/users", CreateUser);
         admin.MapPost("/users/{id:guid}/applications", AssignApplication);
+
+        // Insights Phase A — deploy annotations rendered on dashboard charts.
+        admin.MapPost("/annotations", CreateAnnotation);
+        admin.MapDelete("/annotations/{id:long}", DeleteAnnotation);
+    }
+
+    public sealed record CreateAnnotationRequest(
+        Guid? ApplicationId, Guid? EnvironmentId, DateTime? At, string? Label, string? ReleaseSha);
+
+    /// <summary>Creates a chart annotation (typically a deploy marker) for an app + environment.</summary>
+    private static async Task<IResult> CreateAnnotation(
+        [FromBody] CreateAnnotationRequest? req,
+        HttpContext http,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        if (req?.ApplicationId is null || req.EnvironmentId is null || string.IsNullOrWhiteSpace(req.Label))
+            return Results.BadRequest(new { error = "invalid_request", reason = "application_id, environment_id and label are required." });
+        if (req.Label.Length > 200)
+            return Results.BadRequest(new { error = "invalid_request", reason = "label must be 200 characters or fewer." });
+        if (req.ReleaseSha is { Length: > 64 })
+            return Results.BadRequest(new { error = "invalid_request", reason = "release_sha must be 64 characters or fewer." });
+
+        var envOk = await db.AppEnvironments.AsNoTracking()
+            .AnyAsync(e => e.Id == req.EnvironmentId && e.ApplicationId == req.ApplicationId && e.IsActive, ct);
+        if (!envOk)
+            return Results.NotFound(new { error = "not_found", reason = "No such application/environment pair." });
+
+        var annotation = new Observability.Domain.Telemetry.Annotation
+        {
+            ApplicationId = req.ApplicationId.Value,
+            EnvironmentId = req.EnvironmentId.Value,
+            At = DateTime.SpecifyKind(req.At ?? DateTime.UtcNow, DateTimeKind.Utc),
+            Label = req.Label.Trim(),
+            ReleaseSha = string.IsNullOrWhiteSpace(req.ReleaseSha) ? null : req.ReleaseSha.Trim(),
+            // User id, never email — privacy rules forbid emails in any column.
+            CreatedByUserId = http.GetUserOrNull()?.UserId,
+        };
+        db.Annotations.Add(annotation);
+        await WriteAuditAsync(db, "admin.annotation.created", annotation.ApplicationId, annotation.EnvironmentId, http,
+            new { label = annotation.Label, at = annotation.At, release_sha = annotation.ReleaseSha }, ct);
+        await db.SaveChangesAsync(ct);
+
+        return Results.Created($"/api/admin/annotations/{annotation.Id}", new
+        {
+            id = annotation.Id,
+            application_id = annotation.ApplicationId,
+            environment_id = annotation.EnvironmentId,
+            at = annotation.At,
+            label = annotation.Label,
+            release_sha = annotation.ReleaseSha,
+        });
+    }
+
+    private static async Task<IResult> DeleteAnnotation(
+        long id,
+        HttpContext http,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        var annotation = await db.Annotations.FirstOrDefaultAsync(a => a.Id == id, ct);
+        if (annotation is null)
+            return Results.NotFound(new { error = "not_found" });
+
+        db.Annotations.Remove(annotation);
+        await WriteAuditAsync(db, "admin.annotation.deleted", annotation.ApplicationId, annotation.EnvironmentId, http,
+            new { label = annotation.Label, at = annotation.At }, ct);
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { id, deleted = true });
     }
 
     /// <summary>

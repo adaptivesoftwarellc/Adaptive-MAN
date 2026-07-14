@@ -12,7 +12,7 @@
  */
 
 export type ViewSource = 'builtin' | 'user';
-export type ViewPage = 'health' | 'errors' | 'events' | 'sessions' | 'alerts';
+export type ViewPage = 'health' | 'errors' | 'events' | 'sessions' | 'alerts' | 'insights';
 export type ViewRange = '1h' | '24h' | '7d' | '30d' | 'custom';
 
 export interface DashboardView {
@@ -26,6 +26,8 @@ export interface DashboardView {
   // Only meaningful when range === 'custom'.
   from?: string;
   to?: string;
+  /** Extra page-specific query params (URL-encoded, e.g. Insights metrics/interval/breakdown/agg). */
+  params?: string;
   source: ViewSource;
 }
 
@@ -46,6 +48,10 @@ export function viewHref(v: DashboardView): string {
   if (v.range === 'custom') {
     if (v.from) params.set('from', v.from);
     if (v.to) params.set('to', v.to);
+  }
+  // Restore any page-specific config saved with the view (Insights chart setup, table filters).
+  if (v.params) {
+    for (const [k, val] of new URLSearchParams(v.params)) params.set(k, val);
   }
   return `/${v.page}?${params.toString()}`;
 }

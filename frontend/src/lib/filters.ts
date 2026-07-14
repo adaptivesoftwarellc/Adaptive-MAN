@@ -65,13 +65,18 @@ export function useFilters(): {
 
   const setFilters = (next: Partial<DashboardFilters>) => {
     const merged = { ...filters, ...next };
-    const sp = new URLSearchParams();
+    // Start from the current URL so page-specific params (Insights metrics/interval/breakdown/agg,
+    // table filters) survive an app/env/range change instead of being wiped mid-exploration.
+    const sp = new URLSearchParams(params);
     if (merged.app) sp.set('app', merged.app);
     if (merged.env) sp.set('env', merged.env);
     if (merged.range) sp.set('range', merged.range);
     if (merged.range === 'custom') {
       if (merged.from) sp.set('from', merged.from);
       if (merged.to) sp.set('to', merged.to);
+    } else {
+      sp.delete('from');
+      sp.delete('to');
     }
     setParams(sp, { replace: true });
   };

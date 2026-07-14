@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { resolveRange, useFilters } from '../lib/filters';
+import { METRIC_COLORS } from '../lib/chartColors';
+import { relativeTime } from '../lib/relativeTime';
 import { Card } from '../components/Card';
 import { Sparkline } from '../components/Sparkline';
 import { EmptyState, Panel, Skeleton } from '../components/ui';
@@ -13,6 +15,7 @@ import {
   EyeIcon,
   KeyIcon,
   AlertTriangleIcon,
+  RefreshIcon,
 } from '../components/icons';
 
 export function HealthPage() {
@@ -22,7 +25,7 @@ export function HealthPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- resolveRange only reads range/from/to
   const range = useMemo(() => resolveRange(filters), [filters.range, filters.from, filters.to]);
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery({
     enabled: ready,
     queryKey: ['health', filters.app, filters.env, range.from, range.to],
     queryFn: () => api.health({ app: filters.app, env: filters.env, from: range.from, to: range.to }),
@@ -58,12 +61,19 @@ export function HealthPage() {
   }
 
   const c = data?.cards;
+  const prev = data?.cards_previous;
 
   return (
     <div className="p-6">
-      <Header />
+      <Header
+        updatedAt={data ? dataUpdatedAt : undefined}
+        refreshing={isFetching}
+        onRefresh={() => refetch()}
+      />
 
-      {/* Errors & failures */}
+      {/* Errors & failures. No sparklines or deltas here: error telemetry is persisted to the
+          deduplicated Errors table (lifetime OccurrenceCount + single LastSeenAt), which can
+          produce neither an honest time series nor a meaningful previous-window comparison. */}
       <SectionTitle>Errors &amp; failures</SectionTitle>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         {data && c ? (
@@ -74,27 +84,21 @@ export function HealthPage() {
               to="/errors?category=server"
               icon={<ServerIcon />}
               accent="red"
-            >
-              <Sparkline data={data.sparklines['server_error_occurred']} stroke="#e11d48" />
-            </Card>
+            />
             <Card
               title="Frontend exceptions"
               total={c.frontend_exceptions}
               to="/errors?category=frontend"
               icon={<BugIcon />}
-              accent="orange"
-            >
-              <Sparkline data={data.sparklines['frontend_exception']} stroke="#ea580c" />
-            </Card>
+              accent="violet"
+            />
             <Card
               title="BG job failures"
               total={c.background_job_failures}
               to="/errors?category=background_job"
               icon={<ClockIcon />}
-              accent="amber"
-            >
-              <Sparkline data={data.sparklines['background_job_failed']} stroke="#b45309" />
-            </Card>
+              accent="cyan"
+            />
           </>
         ) : (
           Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)
@@ -112,8 +116,9 @@ export function HealthPage() {
               to="/events?event_name=api_request_failed"
               icon={<WifiOffIcon />}
               accent="amber"
+              delta={prev && { previous: prev.api_request_failures, upIsBad: true }}
             >
-              <Sparkline data={data.sparklines['api_request_failed']} stroke="#d97706" />
+              <Sparkline data={data.sparklines['api_request_failed']} stroke={METRIC_COLORS.api_request_failures} />
             </Card>
             <Card
               title="Page views"
@@ -121,8 +126,9 @@ export function HealthPage() {
               to="/events?event_name=page_viewed"
               icon={<EyeIcon />}
               accent="indigo"
+              delta={prev && { previous: prev.page_views }}
             >
-              <Sparkline data={data.sparklines['page_viewed']} stroke="#6366f1" />
+              <Sparkline data={data.sparklines['page_viewed']} stroke={METRIC_COLORS.page_views} />
             </Card>
             <Card
               title="Logins"
@@ -130,8 +136,9 @@ export function HealthPage() {
               to="/events?event_name=auth_login_success"
               icon={<KeyIcon />}
               accent="green"
+              delta={prev && { previous: prev.logins }}
             >
-              <Sparkline data={data.sparklines['auth_login_success']} stroke="#059669" />
+              <Sparkline data={data.sparklines['auth_login_success']} stroke={METRIC_COLORS.logins} />
             </Card>
           </>
         ) : (
@@ -253,11 +260,38 @@ function BackgroundJobsPanel({
   );
 }
 
-function Header() {
+function Header({
+  updatedAt,
+  refreshing,
+  onRefresh,
+}: {
+  updatedAt?: number;
+  refreshing?: boolean;
+  onRefresh?: () => void;
+}) {
   return (
-    <div className="mb-5">
-      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Health overview</h1>
-      <p className="mt-0.5 text-sm text-slate-500">Live error rates and events across the selected window.</p>
+    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Health overview</h1>
+        <p className="mt-0.5 text-sm text-slate-500">Live error rates and events across the selected window.</p>
+      </div>
+      {onRefresh && (
+        <div className="flex items-center gap-2">
+          {updatedAt !== undefined && (
+            <span className="text-xs text-slate-400" title={new Date(updatedAt).toLocaleString()}>
+              Updated {relativeTime(updatedAt)}
+            </span>
+          )}
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            aria-label="Refresh now"
+          >
+            <RefreshIcon className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
+      )}
     </div>
   );
 }

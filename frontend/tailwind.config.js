@@ -1,6 +1,12 @@
 /** @type {import('tailwindcss').Config} */
+
+// The slate scale is CSS-variable-driven so dark mode can invert it in one place
+// (see index.css :root / .dark). Components keep using slate-* utilities unchanged.
+const sl = (n) => `rgb(var(--sl-${n}) / <alpha-value>)`;
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       fontFamily: {
@@ -39,6 +45,35 @@ export default {
           800: '#3730a3',
           900: '#312e81',
           950: '#1e1b4b',
+        },
+        // Theme-aware neutral scale (inverts in dark mode via CSS variables).
+        slate: {
+          50: sl(50),
+          100: sl(100),
+          200: sl(200),
+          300: sl(300),
+          400: sl(400),
+          500: sl(500),
+          600: sl(600),
+          700: sl(700),
+          800: sl(800),
+          900: sl(900),
+          950: sl(950),
+        },
+        // Fixed dark palette for the app shell (sidebar) — identical in light and dark mode,
+        // so the shell stays dark while the content area follows the theme. Values are the
+        // stock Tailwind slate hexes.
+        shell: {
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
+          950: '#020617',
         },
       },
       boxShadow: {
