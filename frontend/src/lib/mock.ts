@@ -338,12 +338,13 @@ export function mockHealth(q: DashboardQuery): HealthDto {
   };
 
   // Previous-window counts (deterministic ±35% of current) so delta chips render in demo mode.
-  const prevScale = () => 0.65 + makeRng(`${base}:prev`)() * 0.7;
+  // Event-based cards only — error cards have no previous window (see HealthCardsPreviousDto).
+  // One RNG, advanced per card, so each delta differs (a fresh RNG per call would repeat its
+  // first sample and give every chip the same percentage).
+  const prevRng = makeRng(`${base}:prev`);
+  const prevScale = () => 0.65 + prevRng() * 0.7;
   const cards_previous = {
-    backend_500s: Math.round(cards.backend_500s * prevScale()),
-    frontend_exceptions: Math.round(cards.frontend_exceptions * prevScale()),
     api_request_failures: Math.round(cards.api_request_failures * prevScale()),
-    background_job_failures: Math.round(cards.background_job_failures * prevScale()),
     page_views: Math.round(cards.page_views * prevScale()),
     logins: Math.round(cards.logins * prevScale()),
   };

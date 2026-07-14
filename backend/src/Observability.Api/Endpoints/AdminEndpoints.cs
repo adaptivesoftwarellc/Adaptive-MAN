@@ -57,6 +57,8 @@ public static class AdminEndpoints
             return Results.BadRequest(new { error = "invalid_request", reason = "application_id, environment_id and label are required." });
         if (req.Label.Length > 200)
             return Results.BadRequest(new { error = "invalid_request", reason = "label must be 200 characters or fewer." });
+        if (req.ReleaseSha is { Length: > 64 })
+            return Results.BadRequest(new { error = "invalid_request", reason = "release_sha must be 64 characters or fewer." });
 
         var envOk = await db.AppEnvironments.AsNoTracking()
             .AnyAsync(e => e.Id == req.EnvironmentId && e.ApplicationId == req.ApplicationId && e.IsActive, ct);
@@ -70,7 +72,8 @@ public static class AdminEndpoints
             At = DateTime.SpecifyKind(req.At ?? DateTime.UtcNow, DateTimeKind.Utc),
             Label = req.Label.Trim(),
             ReleaseSha = string.IsNullOrWhiteSpace(req.ReleaseSha) ? null : req.ReleaseSha.Trim(),
-            CreatedBy = http.GetUserOrNull()?.Email,
+            // User id, never email — privacy rules forbid emails in any column.
+            CreatedByUserId = http.GetUserOrNull()?.UserId,
         };
         db.Annotations.Add(annotation);
         await WriteAuditAsync(db, "admin.annotation.created", annotation.ApplicationId, annotation.EnvironmentId, http,

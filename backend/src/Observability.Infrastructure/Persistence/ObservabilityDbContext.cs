@@ -192,7 +192,6 @@ public class ObservabilityDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Label).HasMaxLength(200).IsRequired();
             e.Property(x => x.ReleaseSha).HasMaxLength(64);
-            e.Property(x => x.CreatedBy).HasMaxLength(256);
             e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.At });
         });
     }

@@ -98,6 +98,14 @@ export function Sidebar() {
   const handleSave = () => {
     if (!canSave || !currentPage) return;
     const label = name.trim() || `${cap(currentPage)} · ${filters.env}`;
+    // Page-specific config (e.g. the Insights metrics/interval/breakdown/agg) lives in the URL —
+    // capture it so reopening the view restores the exact chart, not the page defaults.
+    const current = new URLSearchParams(location.search);
+    const extras = new URLSearchParams();
+    for (const key of ['metrics', 'interval', 'breakdown', 'agg', 'category', 'event_name']) {
+      const v = current.get(key);
+      if (v) extras.set(key, v);
+    }
     setUserViews(
       addUserView({
         label,
@@ -107,6 +115,7 @@ export function Sidebar() {
         range: filters.range,
         from: filters.from,
         to: filters.to,
+        params: extras.size > 0 ? extras.toString() : undefined,
       }),
     );
     setName('');
@@ -158,7 +167,7 @@ export function Sidebar() {
             {({ isActive }) => (
               <>
                 {isActive && (
-                  <span className="absolute left-0 top-1/2 h-5 w-0.5 -transhell-y-1/2 rounded-full bg-brand-400" />
+                  <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-brand-400" />
                 )}
                 <span className={isActive ? 'text-brand-300' : 'text-shell-500 group-hover:text-shell-300'}>
                   {l.icon}
@@ -331,7 +340,7 @@ function ViewLink({
             e.preventDefault();
             onDelete();
           }}
-          className="absolute right-1.5 top-1/2 -transhell-y-1/2 rounded p-1 text-shell-500 opacity-0 transition hover:bg-shell-700 hover:text-rose-300 group-hover/item:opacity-100"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-shell-500 opacity-0 transition hover:bg-shell-700 hover:text-rose-300 group-hover/item:opacity-100"
           title="Delete view"
           aria-label="Delete view"
         >
@@ -450,8 +459,8 @@ function Switch({ on }: { on: boolean }) {
       }`}
     >
       <span
-        className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition ${
-          on ? 'transhell-x-3.5' : 'transhell-x-0.5'
+        className={`inline-block h-3 w-3 transform rounded-full bg-shell-100 shadow transition ${
+          on ? 'translate-x-3.5' : 'translate-x-0.5'
         }`}
       />
     </span>

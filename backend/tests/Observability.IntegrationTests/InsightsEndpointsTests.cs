@@ -99,26 +99,42 @@ public class InsightsEndpointsTests : IClassFixture<IngestionWebApplicationFacto
     public async Task Trends_unique_users_counts_distinct_ids_not_rows()
     {
         await _factory.SeedAsync();
+        // Isolated app/env: the class fixture shares one InMemory store across tests.
+        var appId = Guid.NewGuid();
+        var envId = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        EventRecord Ev(string distinctId, DateTime at) => new()
+        {
+            ApplicationId = appId,
+            EnvironmentId = envId,
+            EventName = "page_viewed",
+            DistinctId = distinctId,
+            OccurredAt = at,
+            CreatedAt = at,
+        };
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<ObservabilityDbContext>();
-            // Three rows, two distinct users, same hour bucket.
+            // User 42 is active in TWO different hour buckets; user 43 in one. The range-wide
+            // unique total must be 2 — summing per-bucket distinct counts would give 3.
             db.Events.AddRange(
-                NewEvent("page_viewed", now.AddMinutes(-5), "42"),
-                NewEvent("page_viewed", now.AddMinutes(-6), "42"),
-                NewEvent("page_viewed", now.AddMinutes(-7), "43"));
+                Ev("42", now.AddMinutes(-5)),
+                Ev("42", now.AddMinutes(-90)),
+                Ev("42", now.AddMinutes(-6)),
+                Ev("43", now.AddMinutes(-7)));
             await db.SaveChangesAsync();
         }
 
         var client = await _factory.BearerClientAsync(_factory.AdminEmail, _factory.AdminPassword);
         var res = await client.GetFromJsonAsync<TrendsResponse>(
-            $"/api/dashboard/insights/trends?app={_factory.SeededAppId}&env={_factory.SeededEnvId}" +
-            "&events=page_viewed&agg=unique_users&interval=day", Json);
+            $"/api/dashboard/insights/trends?app={appId}&env={envId}" +
+            "&events=page_viewed&agg=unique_users&interval=hour", Json);
 
         Assert.NotNull(res);
         var series = res!.Series.Single(s => s.Event == "page_viewed");
         Assert.Equal(2, series.Total);
+        // Per-bucket values remain distinct-per-bucket (buckets covering user 42 twice still show him once each).
+        Assert.True(series.Total <= 2);
     }
 
     [Fact]

@@ -9,6 +9,8 @@ import { getThemeMode, nextThemeMode, setThemeMode } from '../lib/theme';
 import { useAuth } from '../lib/AuthContext';
 import { SearchIcon } from './icons';
 
+const FOCUSABLE = 'input, button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 interface Command {
   id: string;
   label: string;
@@ -105,6 +107,22 @@ export function CommandPalette() {
       <div
         className="w-full max-w-lg animate-scale-in overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // aria-modal promises the background is inert — trap Tab inside the panel.
+          if (e.key !== 'Tab') return;
+          const panel = e.currentTarget;
+          const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <div className="flex items-center gap-2 border-b border-slate-200 px-4">
           <SearchIcon className="h-4 w-4 shrink-0 text-slate-400" />

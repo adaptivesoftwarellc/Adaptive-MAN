@@ -51,9 +51,9 @@ RBAC/tenant scoping via `EnforceAppScopeAsync` + privileged-access audit).
 | `app`, `env` | Guid | required, as today |
 | `from`, `to` | DateTime? | `ResolveRange` defaults (24 h) |
 | `events` | csv string | 1–5 names; **each must exist in `EventCatalog.Phase1`** → else 400 |
-| `interval` | `hour \| day \| week` | default chosen from range span (≤48 h → hour, ≤90 d → day, else week) |
-| `breakdown` | enum? | `feature_area \| release_sha \| endpoint_group \| http_status_code` — **typed columns only**, never JSON properties |
-| `agg` | `count \| unique_users` | `unique_users` = `COUNT(DISTINCT DistinctId)` |
+| `interval` | `hour \| day \| week` | default from range span (≤48 h → hour, else day); `week` is opt-in and `agg=count` only |
+| `breakdown` | enum? | `feature_area \| release_sha \| endpoint_group` — **typed columns only**, never JSON properties (`http_status_code` is not a typed Events column; add it only if it ever becomes one) |
+| `agg` | `count \| unique_users` | `unique_users` = `COUNT(DISTINCT DistinctId)`; series `total` is a separate range-wide distinct count (per-bucket distincts never sum) |
 
 Response:
 
@@ -74,9 +74,9 @@ Implementation notes:
   top-10 panels).
 - `unique_users` per bucket is `COUNT(DISTINCT DistinctId)` — safe because identity rules
   guarantee `distinct_id` is a PHI-free key.
-- **Index:** additive migration `IX_Events_App_Env_EventName_CreatedAt` (the existing
-  Phase 5 index covers the session path, not name-filtered time scans). Follow
-  `docs/database-migrations.md` (additive → safe at startup).
+- **Index:** no new index needed — the Initial migration already ships
+  `IX_Events_ApplicationId_EventName_CreatedAt`, which covers the name-filtered time scan.
+  Revisit only if real query plans show it insufficient at production volumes.
 
 ### Frontend
 
@@ -104,7 +104,8 @@ This makes "errors by release" actionable: you *see* the deploy on the chart.
 - Trends endpoint 400s on non-catalog event names; 403s cross-tenant (existing filter).
 - `unique_users` never exposes `distinct_id` values — only counts.
 - p95 < 300 ms on 30 d/day-interval over 1 M events (bench with the existing
-  `Observability.Benchmarks` harness; index above).
+  `Observability.Benchmarks` harness; covered by the existing
+  `IX_Events_ApplicationId_EventName_CreatedAt` index).
 - Insights page: save-view roundtrip, CSV export, legend toggle, reduced-motion safe.
 
 ---

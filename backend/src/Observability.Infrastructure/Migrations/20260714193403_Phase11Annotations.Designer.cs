@@ -12,7 +12,7 @@ using Observability.Infrastructure.Persistence;
 namespace Observability.Infrastructure.Migrations
 {
     [DbContext(typeof(ObservabilityDbContext))]
-    [Migration("20260714054648_Phase11Annotations")]
+    [Migration("20260714193403_Phase11Annotations")]
     partial class Phase11Annotations
     {
         /// <inheritdoc />
@@ -371,9 +371,8 @@ namespace Observability.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<string>("CreatedBy")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("EnvironmentId")
                         .HasColumnType("uniqueidentifier");

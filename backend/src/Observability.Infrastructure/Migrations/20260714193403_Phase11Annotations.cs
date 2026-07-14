@@ -22,7 +22,7 @@ namespace Observability.Infrastructure.Migrations
                     At = table.Column<DateTime>(type: "datetime2", nullable: false),
                     Label = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
                     ReleaseSha = table.Column<string>(type: "nvarchar(64)", maxLength: 64, nullable: true),
-                    CreatedBy = table.Column<string>(type: "nvarchar(256)", maxLength: 256, nullable: true),
+                    CreatedByUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false)
                 },
                 constraints: table =>

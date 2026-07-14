@@ -71,7 +71,9 @@ export function HealthPage() {
         onRefresh={() => refetch()}
       />
 
-      {/* Errors & failures */}
+      {/* Errors & failures. No sparklines or deltas here: error telemetry is persisted to the
+          deduplicated Errors table (lifetime OccurrenceCount + single LastSeenAt), which can
+          produce neither an honest time series nor a meaningful previous-window comparison. */}
       <SectionTitle>Errors &amp; failures</SectionTitle>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         {data && c ? (
@@ -82,30 +84,21 @@ export function HealthPage() {
               to="/errors?category=server"
               icon={<ServerIcon />}
               accent="red"
-              delta={prev && { previous: prev.backend_500s, upIsBad: true }}
-            >
-              <Sparkline data={data.sparklines['server_error_occurred']} stroke={METRIC_COLORS.backend_500s} />
-            </Card>
+            />
             <Card
               title="Frontend exceptions"
               total={c.frontend_exceptions}
               to="/errors?category=frontend"
               icon={<BugIcon />}
               accent="violet"
-              delta={prev && { previous: prev.frontend_exceptions, upIsBad: true }}
-            >
-              <Sparkline data={data.sparklines['frontend_exception']} stroke={METRIC_COLORS.frontend_exceptions} />
-            </Card>
+            />
             <Card
               title="BG job failures"
               total={c.background_job_failures}
               to="/errors?category=background_job"
               icon={<ClockIcon />}
               accent="cyan"
-              delta={prev && { previous: prev.background_job_failures, upIsBad: true }}
-            >
-              <Sparkline data={data.sparklines['background_job_failed']} stroke={METRIC_COLORS.background_job_failures} />
-            </Card>
+            />
           </>
         ) : (
           Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)

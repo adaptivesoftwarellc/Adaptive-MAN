@@ -12,6 +12,7 @@ public class Annotation
     public DateTime At { get; set; }
     public string Label { get; set; } = string.Empty;
     public string? ReleaseSha { get; set; }
-    public string? CreatedBy { get; set; }
+    /// <summary>User id of the creating admin. Never an email — privacy rules forbid emails in any column.</summary>
+    public Guid? CreatedByUserId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

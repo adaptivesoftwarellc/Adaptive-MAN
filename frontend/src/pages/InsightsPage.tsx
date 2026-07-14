@@ -59,12 +59,17 @@ export function InsightsPage() {
   const breakdown = (params.get('breakdown') ?? '') as '' | TrendBreakdown;
   const agg = (params.get('agg') ?? 'count') as TrendAgg;
 
-  const setParam = (key: string, value: string) => {
+  // Batched: multiple keys must land in ONE setParams call — two sequential calls would both
+  // clone the same render-scoped snapshot and the second would clobber the first.
+  const setParamsBatch = (entries: Record<string, string>) => {
     const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
+    for (const [key, value] of Object.entries(entries)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
     setParams(next, { replace: true });
   };
+  const setParam = (key: string, value: string) => setParamsBatch({ [key]: value });
 
   const toggleEvent = (name: string) => {
     const has = selected.includes(name);
@@ -216,10 +221,12 @@ export function InsightsPage() {
               ).map((a) => (
                 <button
                   key={a.value}
-                  onClick={() => {
-                    setParam('agg', a.value === 'count' ? '' : a.value);
-                    if (a.value === 'unique_users' && interval === 'week') setParam('interval', '');
-                  }}
+                  onClick={() =>
+                    setParamsBatch({
+                      agg: a.value === 'count' ? '' : a.value,
+                      ...(a.value === 'unique_users' && interval === 'week' ? { interval: '' } : {}),
+                    })
+                  }
                   aria-pressed={agg === a.value}
                   className={`px-2.5 py-1.5 text-xs font-medium transition ${
                     agg === a.value ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'
@@ -260,6 +267,8 @@ export function InsightsPage() {
         <TrendChart
           series={data.series}
           interval={data.range.interval}
+          from={data.range.from}
+          to={data.range.to}
           annotations={annotations ?? []}
         />
       )}
@@ -271,29 +280,52 @@ function seriesKey(s: TrendSeriesDto): string {
   return s.breakdown ? `${s.event} · ${s.breakdown}` : s.event;
 }
 
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
 function TrendChart({
   series,
   interval,
+  from,
+  to,
   annotations,
 }: {
   series: TrendSeriesDto[];
   interval: TrendInterval;
+  from: string;
+  to: string;
   annotations: { id: number; at: string; label: string }[];
 }) {
   // Merge per-series buckets into unified rows keyed by timestamp (Recharts data shape).
+  // The grid is ZERO-FILLED across the whole window: the backend only emits buckets that
+  // have rows, and interpolating across gaps would render empty periods as nonzero traffic.
   const rows = useMemo(() => {
+    const fromMs = new Date(from).getTime();
+    const toMs = new Date(to).getTime();
+    // Bucket anchors mirror the backend: hour = truncate to hour; day = UTC date;
+    // week = UTC date-floor of the range start + 7-day steps.
+    const step = interval === 'hour' ? HOUR_MS : interval === 'day' ? DAY_MS : 7 * DAY_MS;
+    const anchor =
+      interval === 'hour' ? Math.floor(fromMs / HOUR_MS) * HOUR_MS : Math.floor(fromMs / DAY_MS) * DAY_MS;
+
+    const keys = series.map(seriesKey);
     const byT = new Map<number, Record<string, number | string>>();
+    for (let t = anchor; t < toMs; t += step) {
+      const row: Record<string, number | string> = { t };
+      for (const k of keys) row[k] = 0;
+      byT.set(t, row);
+    }
     for (const s of series) {
       const key = seriesKey(s);
       for (const b of s.buckets) {
         const t = new Date(b.t).getTime();
-        const row = byT.get(t) ?? { t };
+        const row = byT.get(t) ?? { t }; // off-grid safety: keep the point rather than drop it
         row[key] = b.c;
         byT.set(t, row);
       }
     }
     return Array.from(byT.values()).sort((a, b) => (a.t as number) - (b.t as number));
-  }, [series]);
+  }, [series, interval, from, to]);
 
   const fmt = (t: number) => {
     const d = new Date(t);
@@ -340,7 +372,6 @@ function TrendChart({
                 stroke={seriesColor(i)}
                 strokeWidth={2}
                 dot={false}
-                connectNulls
                 isAnimationActive={false}
               />
             ))}

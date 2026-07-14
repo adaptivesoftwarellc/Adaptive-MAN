@@ -133,11 +133,21 @@ export interface SparklinePoint {
   c: number;
 }
 
+/**
+ * Previous-window counts exist only for EVENT-based cards: error cards read the deduplicated
+ * Errors table (lifetime OccurrenceCount, single LastSeenAt), which cannot be windowed honestly.
+ */
+export interface HealthCardsPreviousDto {
+  api_request_failures: number;
+  page_views: number;
+  logins: number;
+}
+
 export interface HealthDto {
   range: { from: string; to: string };
   cards: HealthCardsDto;
-  /** Same cards over the immediately preceding window of equal length (for deltas). */
-  cards_previous?: HealthCardsDto;
+  /** Event-based cards over the immediately preceding window of equal length (for deltas). */
+  cards_previous?: HealthCardsPreviousDto;
   by_event: { name: string; count: number }[];
   page_views_by_feature: { feature: string; count: number }[];
   top_failing_endpoint_groups: { endpoint_group: string; occurrences: number }[];

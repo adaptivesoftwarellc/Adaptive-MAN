@@ -156,28 +156,19 @@ public static class DashboardEndpoints
         long errFrontend = await errors.Where(e => e.ExceptionType == null && e.JobName == null)
             .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
 
-        // Same six cards over the window immediately preceding this one (equal length), so the UI can
-        // show period-over-period deltas. One events pass + three error sums, mirroring the above.
+        // Event-based cards over the window immediately preceding this one (equal length), so the UI
+        // can show period-over-period deltas. Only the EVENT cards get previous values: the error
+        // cards can't — Errors rows are deduplicated with a lifetime OccurrenceCount and a single
+        // LastSeenAt, so an ongoing error attributes its whole count to whichever window holds
+        // LastSeenAt and a two-window comparison would be structurally wrong.
         var prevFrom = range.From - (range.To - range.From);
-        var prevEvents = db.Events.AsNoTracking()
+        var prevByEvent = await db.Events.AsNoTracking()
             .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
-                        && e.CreatedAt >= prevFrom && e.CreatedAt < range.From);
-        var prevErrors = db.Errors.AsNoTracking()
-            .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
-                        && e.LastSeenAt >= prevFrom && e.LastSeenAt < range.From);
-
-        var prevByEvent = await prevEvents
+                        && e.CreatedAt >= prevFrom && e.CreatedAt < range.From)
             .GroupBy(e => e.EventName)
             .Select(g => new { name = g.Key, count = g.LongCount() })
             .ToListAsync(ct);
         long PrevCount(string name) => prevByEvent.FirstOrDefault(x => x.name == name)?.count ?? 0L;
-
-        long prevBackend500 = await prevErrors.Where(e => e.ExceptionType != null)
-            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
-        long prevBackgroundJobs = await prevErrors.Where(e => e.ExceptionType == null && e.JobName != null)
-            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
-        long prevFrontend = await prevErrors.Where(e => e.ExceptionType == null && e.JobName == null)
-            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
 
         var pageViewsByFeature = await events
             .Where(e => e.EventName == "page_viewed" && e.FeatureArea != null)
@@ -234,12 +225,10 @@ public static class DashboardEndpoints
                 page_views = Count("page_viewed"),
                 logins = Count("auth_login_success"),
             },
+            // Event-based cards only — see the prevByEvent comment for why error cards are absent.
             cards_previous = new
             {
-                backend_500s = prevBackend500,
-                frontend_exceptions = prevFrontend,
                 api_request_failures = PrevCount("api_request_failed"),
-                background_job_failures = prevBackgroundJobs,
                 page_views = PrevCount("page_viewed"),
                 logins = PrevCount("auth_login_success"),
             },
@@ -524,9 +513,11 @@ public static class DashboardEndpoints
 
     /// <summary>
     /// Trends over the Events table: 1–5 catalog events, hour/day/week bucketing, optional typed-column
-    /// breakdown, totals or unique users. SQL aggregates at hour (count) or bucket (unique_users)
-    /// granularity via the same DATEPART grouping the health sparklines use; week is a server-side
-    /// rollup of day buckets and therefore supports <c>agg=count</c> only (distinct counts don't sum).
+    /// breakdown, totals or unique users. SQL aggregates at hour (count) or target-bucket (unique_users)
+    /// granularity via the same DATEPART grouping the health sparklines use; day/week buckets for
+    /// <c>agg=count</c> are server-side rollups of the hour rows. Week supports <c>agg=count</c> only,
+    /// and unique-user series totals come from a separate range-wide COUNT(DISTINCT) — per-bucket
+    /// distinct counts never sum (a user active in N buckets is still one user).
     /// </summary>
     private static async Task<IResult> GetTrends(
         [FromQuery(Name = "app")] Guid? appId,
@@ -665,6 +656,39 @@ public static class DashboardEndpoints
             .Select(g => new { g.Key.Bucket, g.Key.EventName, g.Key.Key, C = g.Sum(x => x.C) })
             .ToList();
 
+        // Series totals. For counts, buckets sum cleanly; for unique_users they do NOT (a user
+        // active in N buckets would count N times), so totals come from a separate range-wide
+        // COUNT(DISTINCT) query keyed the same way as the series.
+        Dictionary<(string EventName, string? Key), long>? distinctTotals = null;
+        if (uniqueUsers)
+        {
+            var totalRows = breakdown switch
+            {
+                null => await query
+                    .GroupBy(e => new { e.EventName, Key = (string?)null })
+                    .Select(g => new { g.Key.EventName, g.Key.Key, C = g.Select(x => x.DistinctId).Distinct().LongCount() })
+                    .ToListAsync(ct),
+                "feature_area" => await query
+                    .GroupBy(e => new { e.EventName, Key = e.FeatureArea })
+                    .Select(g => new { g.Key.EventName, g.Key.Key, C = g.Select(x => x.DistinctId).Distinct().LongCount() })
+                    .ToListAsync(ct),
+                "release_sha" => await query
+                    .GroupBy(e => new { e.EventName, Key = e.ReleaseSha })
+                    .Select(g => new { g.Key.EventName, g.Key.Key, C = g.Select(x => x.DistinctId).Distinct().LongCount() })
+                    .ToListAsync(ct),
+                _ => await query
+                    .GroupBy(e => new { e.EventName, Key = e.EndpointGroup })
+                    .Select(g => new { g.Key.EventName, g.Key.Key, C = g.Select(x => x.DistinctId).Distinct().LongCount() })
+                    .ToListAsync(ct),
+            };
+            distinctTotals = totalRows.ToDictionary(x => (x.EventName, x.Key), x => x.C);
+        }
+
+        long SeriesTotal(string eventName, string? key, long bucketSum) =>
+            distinctTotals is null
+                ? bucketSum
+                : distinctTotals.GetValueOrDefault((eventName, key == "(none)" ? null : key), 0L);
+
         // With a breakdown, keep the top-N values by total and roll the tail into "other"
         // (dropped instead for unique_users, where distinct counts cannot be summed).
         string? RollKey(string? key, HashSet<string> top) =>
@@ -678,7 +702,7 @@ public static class DashboardEndpoints
                 .Select(g => new TrendSeries(
                     g.Key,
                     null,
-                    g.Sum(x => x.C),
+                    SeriesTotal(g.Key, null, g.Sum(x => x.C)),
                     g.OrderBy(x => x.Bucket).Select(x => new TrendBucket(x.Bucket, x.C)).ToArray()))
                 .OrderByDescending(s => s.total)
                 .ToList();
@@ -700,7 +724,7 @@ public static class DashboardEndpoints
                 .Select(g => new TrendSeries(
                     g.Key.EventName,
                     g.Key.Key,
-                    g.Sum(x => x.C),
+                    SeriesTotal(g.Key.EventName, g.Key.Key, g.Sum(x => x.C)),
                     g.GroupBy(x => x.Bucket)
                         .OrderBy(b => b.Key)
                         .Select(b => new TrendBucket(b.Key, b.Sum(x => x.C)))
