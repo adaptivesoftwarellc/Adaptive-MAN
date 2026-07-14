@@ -14,6 +14,7 @@ import type {
   AdminAppDto,
   AlertRowDto,
   AlertRuleTypeName,
+  AnnotationDto,
   ApiKeyDto,
   ApiKeyTypeName,
   AppDto,
@@ -31,6 +32,9 @@ import type {
   SparklinePoint,
   TimelineDto,
   TimelineEntry,
+  TrendsDto,
+  TrendSeriesDto,
+  TrendsQuery,
 } from './api';
 import { EVENT_NAMES, errorCategory } from './catalog';
 
@@ -333,6 +337,17 @@ export function mockHealth(q: DashboardQuery): HealthDto {
     logins: sum(sparklines.auth_login_success),
   };
 
+  // Previous-window counts (deterministic ±35% of current) so delta chips render in demo mode.
+  const prevScale = () => 0.65 + makeRng(`${base}:prev`)() * 0.7;
+  const cards_previous = {
+    backend_500s: Math.round(cards.backend_500s * prevScale()),
+    frontend_exceptions: Math.round(cards.frontend_exceptions * prevScale()),
+    api_request_failures: Math.round(cards.api_request_failures * prevScale()),
+    background_job_failures: Math.round(cards.background_job_failures * prevScale()),
+    page_views: Math.round(cards.page_views * prevScale()),
+    logins: Math.round(cards.logins * prevScale()),
+  };
+
   const rankList = <T extends string>(items: readonly T[], lo: number, hi: number) =>
     items
       .map((label) => ({ label, value: intBetween(r, lo, hi) }))
@@ -345,6 +360,7 @@ export function mockHealth(q: DashboardQuery): HealthDto {
   return {
     range: { from: from.toISOString(), to: to.toISOString() },
     cards,
+    cards_previous,
     by_event: EVENT_NAMES.map((name) => ({ name, count: intBetween(r, 5, Math.round(1200 * scale)) })).sort(
       (a, b) => b.count - a.count,
     ),
@@ -712,4 +728,57 @@ function paginate<T>(rows: T[], q: PagingQuery): PagedResult<T> {
     page_size: pageSize,
     rows: rows.slice(start, start + pageSize),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Insights Phase A — trends + annotations (docs/product-analytics-plan.md)
+// ---------------------------------------------------------------------------
+
+const BREAKDOWN_VALUES: Record<string, readonly string[]> = {
+  feature_area: FEATURES,
+  release_sha: RELEASES,
+  endpoint_group: ENDPOINT_GROUPS.slice(0, 5),
+};
+
+export function mockTrends(q: TrendsQuery): TrendsDto {
+  const { from, to } = windowOf(q);
+  const base = `${q.app}:${q.env}`;
+  const scale = q.env === 'Production' ? 1 : 0.3;
+  const names = q.events.split(',').filter(Boolean);
+  const interval = q.interval ?? ((to.getTime() - from.getTime()) <= 48 * 3_600_000 ? 'hour' : 'day');
+  const values = q.breakdown ? BREAKDOWN_VALUES[q.breakdown] ?? ['(none)'] : [null];
+
+  const series: TrendSeriesDto[] = names.flatMap((name, ni) =>
+    values.map((value, vi) => {
+      const seed = `${base}:trend:${name}:${value ?? ''}:${q.agg ?? 'count'}`;
+      const magnitude = name === 'page_viewed' ? 120 : name === 'auth_login_success' ? 30 : 8;
+      const buckets = sparkline(from, to, seed, (magnitude * scale) / (vi + 1) / (ni + 1), magnitude / 2);
+      return {
+        event: name,
+        breakdown: value,
+        total: sum(buckets),
+        buckets,
+      };
+    }),
+  );
+  series.sort((a, b) => b.total - a.total);
+
+  return {
+    range: { from: from.toISOString(), to: to.toISOString(), interval },
+    agg: q.agg ?? 'count',
+    series,
+  };
+}
+
+export function mockAnnotations(q: DashboardQuery): AnnotationDto[] {
+  const { from, to } = windowOf(q);
+  const r = makeRng(`${q.app}:${q.env}:annotations`);
+  const spanMs = to.getTime() - from.getTime();
+  // One or two deterministic deploy markers inside the window.
+  const count = spanMs > 12 * 3_600_000 ? 2 : 1;
+  return Array.from({ length: count }, (_, i) => {
+    const at = new Date(from.getTime() + spanMs * (0.25 + 0.45 * i + r() * 0.1));
+    const sha = RELEASES[intBetween(r, 0, RELEASES.length - 1)];
+    return { id: i + 1, at: at.toISOString(), label: `deploy ${sha}`, release_sha: sha };
+  });
 }

@@ -25,6 +25,7 @@ public class ObservabilityDbContext : DbContext
     public DbSet<UserApplicationAssignment> UserApplicationAssignments => Set<UserApplicationAssignment>();
     public DbSet<AlertRule> AlertRules => Set<AlertRule>();
     public DbSet<FiredAlert> FiredAlerts => Set<FiredAlert>();
+    public DbSet<Annotation> Annotations => Set<Annotation>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -183,6 +184,16 @@ public class ObservabilityDbContext : DbContext
             e.Property(x => x.DetailsJson).HasColumnType("nvarchar(max)").IsRequired();
             e.HasIndex(x => new { x.AlertRuleId, x.DedupKey, x.FiredAt });
             e.HasIndex(x => new { x.ApplicationId, x.FiredAt });
+        });
+
+        b.Entity<Annotation>(e =>
+        {
+            e.ToTable("Annotations");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Label).HasMaxLength(200).IsRequired();
+            e.Property(x => x.ReleaseSha).HasMaxLength(64);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.HasIndex(x => new { x.ApplicationId, x.EnvironmentId, x.At });
         });
     }
 }

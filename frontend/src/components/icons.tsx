@@ -187,3 +187,30 @@ export const CalendarIcon = (p: IconProps) => (
     <path d="M16 2v4M8 2v4M3 10h18" />
   </Base>
 );
+
+export const TrendingUpIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M22 7l-8.5 8.5-5-5L2 17" />
+    <path d="M16 7h6v6" />
+  </Base>
+);
+
+export const SunIcon = (p: IconProps) => (
+  <Base {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+  </Base>
+);
+
+export const MoonIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z" />
+  </Base>
+);
+
+export const MonitorIcon = (p: IconProps) => (
+  <Base {...p}>
+    <rect x="2" y="3" width="20" height="14" rx="2" />
+    <path d="M8 21h8M12 17v4" />
+  </Base>
+);

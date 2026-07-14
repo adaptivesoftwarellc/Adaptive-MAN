@@ -2,6 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------------------------------------------------------------------
+   Theme variables. The slate scale is variable-driven (tailwind.config.js), so
+   dark mode is a single remap here: the scale inverts (light text on dark
+   surfaces) and `bg-white` surfaces are rewritten to a dark surface color.
+   The sidebar uses the fixed `shell` palette and is unaffected.
+--------------------------------------------------------------------------- */
+
+:root {
+  --sl-50: 248 250 252;
+  --sl-100: 241 245 249;
+  --sl-200: 226 232 240;
+  --sl-300: 203 213 225;
+  --sl-400: 148 163 184;
+  --sl-500: 100 116 139;
+  --sl-600: 71 85 105;
+  --sl-700: 51 65 85;
+  --sl-800: 30 41 59;
+  --sl-900: 15 23 42;
+  --sl-950: 2 6 23;
+  --surface: 255 255 255;
+  color-scheme: light;
+}
+
+.dark {
+  --sl-50: 15 23 42;
+  --sl-100: 30 41 59;
+  --sl-200: 51 65 85;
+  --sl-300: 71 85 105;
+  --sl-400: 100 116 139;
+  --sl-500: 148 163 184;
+  --sl-600: 203 213 225;
+  --sl-700: 226 232 240;
+  --sl-800: 241 245 249;
+  --sl-900: 248 250 252;
+  --sl-950: 255 255 255;
+  --surface: 30 41 59;
+  color-scheme: dark;
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
@@ -19,14 +58,26 @@
 
   /* Consistent focus ring across interactive elements. */
   :where(button, a, input, select, [tabindex]):focus-visible {
-    @apply outline-none ring-2 ring-brand-500/60 ring-offset-1 ring-offset-white;
+    outline: none;
+    box-shadow:
+      0 0 0 1px rgb(var(--surface)),
+      0 0 0 3px rgb(99 102 241 / 0.6);
   }
+}
+
+/* Surfaces: bg-white means "card surface", which is dark in dark mode. Scoped so
+   explicit text-white (e.g. on brand buttons) is untouched. */
+.dark .bg-white {
+  background-color: rgb(var(--surface));
+}
+.dark .hover\:bg-white:hover {
+  background-color: rgb(var(--surface));
 }
 
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgb(203 213 225) transparent;
+    scrollbar-color: rgb(var(--sl-300)) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 8px;
@@ -60,10 +111,24 @@
     );
     animation: shimmer 1.6s infinite;
   }
+  .dark .shimmer::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(255 255 255 / 0.08),
+      transparent
+    );
+  }
 }
 
 @keyframes shimmer {
   100% {
     transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer::after {
+    animation: none;
   }
 }

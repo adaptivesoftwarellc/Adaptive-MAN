@@ -3,7 +3,9 @@ import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { FilterBar } from './components/FilterBar';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { CommandPalette } from './components/CommandPalette';
 import { HealthPage } from './pages/HealthPage';
+import { InsightsPage } from './pages/InsightsPage';
 import { ErrorsPage } from './pages/ErrorsPage';
 import { EventsPage } from './pages/EventsPage';
 import { AlertsPage } from './pages/AlertsPage';
@@ -45,6 +47,7 @@ function Layout() {
           </div>
         </main>
       </div>
+      <CommandPalette />
     </div>
   );
 }
@@ -63,6 +66,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/health" replace />} />
         <Route path="health" element={<HealthPage />} />
+        <Route path="insights" element={<InsightsPage />} />
         <Route path="errors" element={<ErrorsPage />} />
         <Route path="events" element={<EventsPage />} />
         <Route path="alerts" element={<AlertsPage />} />

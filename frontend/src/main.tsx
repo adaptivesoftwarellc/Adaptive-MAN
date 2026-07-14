@@ -4,7 +4,11 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import { AuthProvider } from './lib/AuthContext';
+import { initTheme } from './lib/theme';
 import './index.css';
+
+// Apply the persisted theme before first paint so there is no light-mode flash.
+initTheme();
 
 const queryClient = new QueryClient({
   defaultOptions: {

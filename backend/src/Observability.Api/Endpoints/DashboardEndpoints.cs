@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Observability.Api.Middleware;
+using Observability.Application.Ingestion;
 using Observability.Domain.Alerting;
 using Observability.Domain.Telemetry;
 using Observability.Infrastructure.Persistence;
@@ -35,6 +36,8 @@ public static class DashboardEndpoints
         dash.MapGet("/events", GetEvents);
         dash.MapGet("/sessions", GetSessions);
         dash.MapGet("/alerts", GetAlerts);
+        dash.MapGet("/insights/trends", GetTrends);
+        dash.MapGet("/annotations", GetAnnotations);
     }
 
     /// <summary>
@@ -153,6 +156,29 @@ public static class DashboardEndpoints
         long errFrontend = await errors.Where(e => e.ExceptionType == null && e.JobName == null)
             .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
 
+        // Same six cards over the window immediately preceding this one (equal length), so the UI can
+        // show period-over-period deltas. One events pass + three error sums, mirroring the above.
+        var prevFrom = range.From - (range.To - range.From);
+        var prevEvents = db.Events.AsNoTracking()
+            .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
+                        && e.CreatedAt >= prevFrom && e.CreatedAt < range.From);
+        var prevErrors = db.Errors.AsNoTracking()
+            .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
+                        && e.LastSeenAt >= prevFrom && e.LastSeenAt < range.From);
+
+        var prevByEvent = await prevEvents
+            .GroupBy(e => e.EventName)
+            .Select(g => new { name = g.Key, count = g.LongCount() })
+            .ToListAsync(ct);
+        long PrevCount(string name) => prevByEvent.FirstOrDefault(x => x.name == name)?.count ?? 0L;
+
+        long prevBackend500 = await prevErrors.Where(e => e.ExceptionType != null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+        long prevBackgroundJobs = await prevErrors.Where(e => e.ExceptionType == null && e.JobName != null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+        long prevFrontend = await prevErrors.Where(e => e.ExceptionType == null && e.JobName == null)
+            .SumAsync(e => (long?)e.OccurrenceCount, ct) ?? 0L;
+
         var pageViewsByFeature = await events
             .Where(e => e.EventName == "page_viewed" && e.FeatureArea != null)
             .GroupBy(e => e.FeatureArea!)
@@ -207,6 +233,15 @@ public static class DashboardEndpoints
                 background_job_failures = errBackgroundJobs,
                 page_views = Count("page_viewed"),
                 logins = Count("auth_login_success"),
+            },
+            cards_previous = new
+            {
+                backend_500s = prevBackend500,
+                frontend_exceptions = prevFrontend,
+                api_request_failures = PrevCount("api_request_failed"),
+                background_job_failures = prevBackgroundJobs,
+                page_views = PrevCount("page_viewed"),
+                logins = PrevCount("auth_login_success"),
             },
             by_event = byEvent,
             page_views_by_feature = pageViewsByFeature,
@@ -474,6 +509,239 @@ public static class DashboardEndpoints
         });
 
         return Results.Ok(new { total, page = skip / take, page_size = take, rows });
+    }
+
+    // -----------------------------------------------------------------------
+    // Insights — Phase A of docs/product-analytics-plan.md.
+    // -----------------------------------------------------------------------
+
+    /// <summary>Breakdown dimensions are typed columns only — never free-form JSON properties.</summary>
+    private static readonly HashSet<string> TrendBreakdowns =
+        new(StringComparer.Ordinal) { "feature_area", "release_sha", "endpoint_group" };
+
+    private const int TrendMaxEvents = 5;
+    private const int TrendMaxBreakdownValues = 10;
+
+    /// <summary>
+    /// Trends over the Events table: 1–5 catalog events, hour/day/week bucketing, optional typed-column
+    /// breakdown, totals or unique users. SQL aggregates at hour (count) or bucket (unique_users)
+    /// granularity via the same DATEPART grouping the health sparklines use; week is a server-side
+    /// rollup of day buckets and therefore supports <c>agg=count</c> only (distinct counts don't sum).
+    /// </summary>
+    private static async Task<IResult> GetTrends(
+        [FromQuery(Name = "app")] Guid? appId,
+        [FromQuery(Name = "env")] Guid? envId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery(Name = "events")] string? eventsCsv,
+        [FromQuery] string? interval,
+        [FromQuery] string? breakdown,
+        [FromQuery] string? agg,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        if (appId is null || envId is null)
+            return Results.BadRequest(new { error = "missing_filter", reason = "app and env are required." });
+
+        var names = (eventsCsv ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (names.Length is 0 or > TrendMaxEvents)
+            return Results.BadRequest(new { error = "invalid_events", reason = $"Provide 1–{TrendMaxEvents} comma-separated event names." });
+        var unknown = names.Where(n => !EventCatalog.Phase1.ContainsKey(n)).ToArray();
+        if (unknown.Length > 0)
+            return Results.BadRequest(new { error = "unknown_event", reason = $"Not in the event catalog: {string.Join(", ", unknown)}." });
+
+        if (breakdown is not null && !TrendBreakdowns.Contains(breakdown))
+            return Results.BadRequest(new { error = "invalid_breakdown", reason = $"breakdown must be one of: {string.Join(", ", TrendBreakdowns)}." });
+
+        var uniqueUsers = agg switch
+        {
+            null or "count" => false,
+            "unique_users" => true,
+            _ => (bool?)null,
+        } ?? false;
+        if (agg is not (null or "count" or "unique_users"))
+            return Results.BadRequest(new { error = "invalid_agg", reason = "agg must be count or unique_users." });
+
+        var range = ResolveRange(from, to);
+        var span = range.To - range.From;
+        var resolvedInterval = interval ?? (span <= TimeSpan.FromHours(48) ? "hour" : "day");
+        if (resolvedInterval is not ("hour" or "day" or "week"))
+            return Results.BadRequest(new { error = "invalid_interval", reason = "interval must be hour, day or week." });
+        if (uniqueUsers && resolvedInterval == "week")
+            return Results.BadRequest(new { error = "unsupported_combination", reason = "unique_users supports hour and day intervals only (distinct counts cannot be rolled up)." });
+
+        // List<T>.Contains, not array Contains: with newer SDKs the array form binds to the
+        // MemoryExtensions ReadOnlySpan overload, which EF cannot evaluate as a query parameter.
+        var nameList = names.ToList();
+        var query = db.Events.AsNoTracking()
+            .Where(e => e.ApplicationId == appId && e.EnvironmentId == envId
+                        && e.CreatedAt >= range.From && e.CreatedAt < range.To
+                        && nameList.Contains(e.EventName));
+
+        // Group at hour granularity for counts (rolled up server-side), or at target granularity for
+        // unique users. Anonymous DATEPART keys translate on SQL Server and evaluate on InMemory.
+        List<TrendRow> raw;
+        var hourKeyed = !uniqueUsers || resolvedInterval == "hour";
+        if (breakdown is null)
+        {
+            raw = hourKeyed
+                ? await query
+                    .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.CreatedAt.Hour, e.EventName })
+                    .Select(g => new TrendRow(
+                        g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.EventName, null,
+                        uniqueUsers ? g.Select(x => x.DistinctId).Distinct().LongCount() : g.LongCount()))
+                    .ToListAsync(ct)
+                : await query
+                    .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.EventName })
+                    .Select(g => new TrendRow(
+                        g.Key.Year, g.Key.Month, g.Key.Day, 0, g.Key.EventName, null,
+                        g.Select(x => x.DistinctId).Distinct().LongCount()))
+                    .ToListAsync(ct);
+        }
+        else
+        {
+            // The breakdown column must appear inline in the key for translation, hence one branch per column.
+            raw = breakdown switch
+            {
+                "feature_area" => hourKeyed
+                    ? await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.CreatedAt.Hour, e.EventName, Key = e.FeatureArea })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.EventName, g.Key.Key,
+                            uniqueUsers ? g.Select(x => x.DistinctId).Distinct().LongCount() : g.LongCount()))
+                        .ToListAsync(ct)
+                    : await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.EventName, Key = e.FeatureArea })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, 0, g.Key.EventName, g.Key.Key,
+                            g.Select(x => x.DistinctId).Distinct().LongCount()))
+                        .ToListAsync(ct),
+                "release_sha" => hourKeyed
+                    ? await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.CreatedAt.Hour, e.EventName, Key = e.ReleaseSha })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.EventName, g.Key.Key,
+                            uniqueUsers ? g.Select(x => x.DistinctId).Distinct().LongCount() : g.LongCount()))
+                        .ToListAsync(ct)
+                    : await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.EventName, Key = e.ReleaseSha })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, 0, g.Key.EventName, g.Key.Key,
+                            g.Select(x => x.DistinctId).Distinct().LongCount()))
+                        .ToListAsync(ct),
+                _ => hourKeyed
+                    ? await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.CreatedAt.Hour, e.EventName, Key = e.EndpointGroup })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, g.Key.Hour, g.Key.EventName, g.Key.Key,
+                            uniqueUsers ? g.Select(x => x.DistinctId).Distinct().LongCount() : g.LongCount()))
+                        .ToListAsync(ct)
+                    : await query
+                        .GroupBy(e => new { e.CreatedAt.Year, e.CreatedAt.Month, e.CreatedAt.Day, e.EventName, Key = e.EndpointGroup })
+                        .Select(g => new TrendRow(
+                            g.Key.Year, g.Key.Month, g.Key.Day, 0, g.Key.EventName, g.Key.Key,
+                            g.Select(x => x.DistinctId).Distinct().LongCount()))
+                        .ToListAsync(ct),
+            };
+        }
+
+        // Roll raw rows up to the requested interval bucket.
+        DateTime BucketOf(TrendRow r)
+        {
+            var t = new DateTime(r.Year, r.Month, r.Day, r.Hour, 0, 0, DateTimeKind.Utc);
+            return resolvedInterval switch
+            {
+                "hour" => t,
+                "day" => t.Date,
+                _ => range.From.Date.AddDays(Math.Floor((t.Date - range.From.Date).TotalDays / 7) * 7),
+            };
+        }
+
+        var grouped = raw
+            .GroupBy(r => new { Bucket = BucketOf(r), r.EventName, r.Key })
+            .Select(g => new { g.Key.Bucket, g.Key.EventName, g.Key.Key, C = g.Sum(x => x.C) })
+            .ToList();
+
+        // With a breakdown, keep the top-N values by total and roll the tail into "other"
+        // (dropped instead for unique_users, where distinct counts cannot be summed).
+        string? RollKey(string? key, HashSet<string> top) =>
+            key is not null && top.Contains(key) ? key : (key is null ? "(none)" : "other");
+
+        List<TrendSeries> series;
+        if (breakdown is null)
+        {
+            series = grouped
+                .GroupBy(x => x.EventName)
+                .Select(g => new TrendSeries(
+                    g.Key,
+                    null,
+                    g.Sum(x => x.C),
+                    g.OrderBy(x => x.Bucket).Select(x => new TrendBucket(x.Bucket, x.C)).ToArray()))
+                .OrderByDescending(s => s.total)
+                .ToList();
+        }
+        else
+        {
+            var topValues = grouped
+                .Where(x => x.Key is not null)
+                .GroupBy(x => x.Key!)
+                .OrderByDescending(g => g.Sum(x => x.C))
+                .Take(TrendMaxBreakdownValues)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.Ordinal);
+
+            series = grouped
+                .Select(x => new { x.Bucket, x.EventName, Key = RollKey(x.Key, topValues), x.C })
+                .Where(x => !uniqueUsers || x.Key != "other")
+                .GroupBy(x => new { x.EventName, x.Key })
+                .Select(g => new TrendSeries(
+                    g.Key.EventName,
+                    g.Key.Key,
+                    g.Sum(x => x.C),
+                    g.GroupBy(x => x.Bucket)
+                        .OrderBy(b => b.Key)
+                        .Select(b => new TrendBucket(b.Key, b.Sum(x => x.C)))
+                        .ToArray()))
+                .OrderByDescending(s => s.total)
+                .ToList();
+        }
+
+        return Results.Ok(new
+        {
+            range = new { from = range.From, to = range.To, interval = resolvedInterval },
+            agg = uniqueUsers ? "unique_users" : "count",
+            series,
+        });
+    }
+
+    private sealed record TrendRow(int Year, int Month, int Day, int Hour, string EventName, string? Key, long C);
+    private sealed record TrendBucket(DateTime t, long c);
+    private sealed record TrendSeries(string @event, string? breakdown, long total, TrendBucket[] buckets);
+
+    /// <summary>Annotations (deploy markers) in range, for chart overlays. Read-only on the dashboard.</summary>
+    private static async Task<IResult> GetAnnotations(
+        [FromQuery(Name = "app")] Guid? appId,
+        [FromQuery(Name = "env")] Guid? envId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        ObservabilityDbContext db,
+        CancellationToken ct)
+    {
+        if (appId is null || envId is null)
+            return Results.BadRequest(new { error = "missing_filter", reason = "app and env are required." });
+
+        var range = ResolveRange(from, to);
+        var rows = await db.Annotations.AsNoTracking()
+            .Where(a => a.ApplicationId == appId && a.EnvironmentId == envId
+                        && a.At >= range.From && a.At < range.To)
+            .OrderBy(a => a.At)
+            .Select(a => new { id = a.Id, at = a.At, label = a.Label, release_sha = a.ReleaseSha })
+            .ToListAsync(ct);
+
+        return Results.Ok(new { rows });
     }
 
     private static (DateTime From, DateTime To) ResolveRange(DateTime? from, DateTime? to)
